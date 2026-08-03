@@ -1,0 +1,92 @@
+{
+  "name": "gitscribe",
+  "displayName": "Git Scribe",
+  "description": "AI-powered Git commit message generator",
+  "version": "1.0.0",
+  "publisher": "werbenhu",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/werbenhu/gitscribe.git"
+  },
+  "homepage": "https://github.com/werbenhu/gitscribe",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "commit message",
+    "openai",
+    "anthropic",
+    "claude"
+  ],
+  "activationEvents": [],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitscribe.generate",
+        "title": "Git Scribe: 生成提交信息",
+        "icon": {
+          "light": "resources/icon-light.png",
+          "dark": "resources/icon-dark.png"
+        }
+      },
+      {
+        "command": "gitscribe.openSettings",
+        "title": "Git Scribe: 配置模型供应商",
+        "icon": {
+          "light": "resources/icon-light.png",
+          "dark": "resources/icon-dark.png"
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "gitscribe.generate",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+alt+g",
+        "when": "scmProvider == git"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "gitscribe.generate",
+          "when": "scmProvider == git",
+          "group": "navigation@1"
+        }
+      ],
+      "scm/sourceControl": [
+        {
+          "command": "gitscribe.openSettings",
+          "when": "scmProvider == git",
+          "group": "2_modifications@1"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "compile-watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production",
+    "type-check": "tsc --noEmit",
+    "build": "npm run type-check && npm run package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.3.3"
+  }
+}

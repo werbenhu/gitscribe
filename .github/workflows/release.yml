@@ -1,0 +1,52 @@
+name: Release
+
+# Trigger only on tags starting with "v" (e.g. v1.0.0, v1.1.0).
+# Pushing any other branch or tag does nothing.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # required to create the GitHub Release and upload assets
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      # Read the version from package.json so the .vsix filename always
+      # matches what's declared, regardless of the tag name.
+      - name: Read version
+        id: version
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Package .vsix
+        run: npx @vscode/vsce@latest package --no-dependencies --no-git-tag-version
+
+      - name: Upload .vsix as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitscribe-${{ steps.version.outputs.version }}-vsix
+          path: '*.vsix'
+          if-no-files-found: error
+
+      - name: Create GitHub Release with the .vsix
+        uses: softprops/action-gh-release@v2
+        with:
+          files: '*.vsix'
+          generate_release_notes: true
