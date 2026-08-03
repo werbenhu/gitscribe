@@ -44,6 +44,8 @@ export function getDefaultSystemPrompt(language: CommitLanguage): string {
       '- Body should explain "why" and "what", not a file list or path dump',
       '- Write the message in English',
       '- Return ONLY the commit message itself: no explanations, no quote wrapping, no markdown code fences',
+      '- Do NOT write any preamble, analysis, or notes before the message (e.g. "Because...", "Based on...", "Here is...")',
+      '- The first line MUST be the Conventional Commits subject, e.g. feat(ui): xxx',
       '- Do not use <think> tags or show thinking process',
       '- Do not include any XML tags or special markers',
       '- Focus on actual functional changes in the code, not file names or paths',
@@ -98,6 +100,8 @@ export function getDefaultSystemPrompt(language: CommitLanguage): string {
     '- 正文说明「为什么」和「改了什么」，不要罗列文件名或路径',
     '- 使用简体中文输出',
     '- 只返回提交信息本身：不要额外解释、不要引号包裹、不要 markdown 代码块',
+    '- 不要在提交信息前写任何前言、分析或说明（例如「由于…」「基于…」「生成如下」等）',
+    '- 第一行必须是符合约定式提交格式的标题，例如 feat(ui): xxx',
     '- 不要使用 <think> 标签或展示思考过程',
     '- 不要包含任何 XML 标签或特殊标记',
     '- 关注代码的实际功能变化，而不是文件名或路径',
@@ -197,7 +201,7 @@ export function buildPrompt(
 
 /**
  * 清洗模型输出:去 <think> 块、代码围栏、首尾引号,
- * 并保证标题与正文之间有空行。
+ * 并尽量剥掉模型在提交信息前加的解释性前言。
  */
 export function sanitizeCommitMessage(raw: string): string {
   let text = raw.trim();
@@ -211,7 +215,7 @@ export function sanitizeCommitMessage(raw: string): string {
     text = fence[1].trim();
   }
 
-  // 去掉整体首尾引号
+  // 若整体被引号包裹,先剥掉
   if (
     (text.startsWith('"') && text.endsWith('"')) ||
     (text.startsWith("'") && text.endsWith("'")) ||
@@ -220,13 +224,38 @@ export function sanitizeCommitMessage(raw: string): string {
     text = text.slice(1, -1).trim();
   }
 
-  // 标题与正文之间保证恰好一个空行
   const lines = text.split('\n');
-  if (lines.length > 1) {
-    const [first, ...rest] = lines;
+  const subjectIndex = findSubjectLineIndex(lines);
+  if (subjectIndex > 0) {
+    // 丢弃首条标题之前的所有解释性内容
+    text = lines.slice(subjectIndex).join('\n').trim();
+  }
+
+  const finalLines = text.split('\n');
+  if (finalLines.length > 1) {
+    const [first, ...rest] = finalLines;
     const restJoined = rest.join('\n').replace(/^\n+/, '');
     text = restJoined ? `${first}\n\n${restJoined}` : first;
   }
 
   return text.trim();
+}
+
+/**
+ * 找到第一个像提交标题的行(以常见 type 开头),返回其行号;
+ * 找不到则返回 0(表示第一行就是标题)。
+ */
+function findSubjectLineIndex(lines: string[]): number {
+  const subjectRe = new RegExp(
+    '^\\s*(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)' +
+      '(\\([^)]*\\))?!?\\s*:\\s*\\S',
+    'i',
+  );
+  const maxScan = Math.min(lines.length, 12);
+  for (let i = 0; i < maxScan; i++) {
+    if (subjectRe.test(lines[i])) {
+      return i;
+    }
+  }
+  return 0;
 }
