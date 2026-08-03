@@ -12,8 +12,8 @@ export function activate(context: vscode.ExtensionContext): void {
   gitService = new GitService();
 
   context.subscriptions.push(
-    vscode.commands.registerCommand('gitscribe.generate', () => generateCommand()),
-    vscode.commands.registerCommand('gitscribe.openSettings', () =>
+    vscode.commands.registerCommand('gitCommitScribe.generate', () => generateCommand()),
+    vscode.commands.registerCommand('gitCommitScribe.openSettings', () =>
       SettingsPanel.show(store),
     ),
   );

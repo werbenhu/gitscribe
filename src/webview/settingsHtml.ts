@@ -1,12 +1,13 @@
-import { API_FORMAT_OPTIONS } from '../constants';
+import { API_FORMAT_OPTIONS, CONTEXT_DEFAULTS } from '../constants';
 
 /**
  * 生成设置面板的 HTML(内联 CSS/JS,CSP 使用 nonce)。
  * 界面数据全部通过 postMessage 传递,不插值进 HTML,避免注入问题;
- * 仅注入静态的 API 格式选项(扩展内常量,内容可信)。
+ * 仅注入静态的 API 格式选项与默认上下文(扩展内常量,内容可信)。
  */
 export function getSettingsHtml(nonce: string): string {
   const formatsJson = JSON.stringify(API_FORMAT_OPTIONS).replace(/</g, '\\u003c');
+  const defaultContextSize = CONTEXT_DEFAULTS.CONTEXT_SIZE;
 
   return `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -27,7 +28,6 @@ export function getSettingsHtml(nonce: string): string {
     height: 100vh;
     overflow: hidden;
   }
-  /* ---------------- 侧边栏 ---------------- */
   #sidebar {
     width: 220px;
     min-width: 220px;
@@ -99,7 +99,19 @@ export function getSettingsHtml(nonce: string): string {
   }
   #sidebarFooter select:focus { border-color: var(--vscode-focusBorder); }
   #sidebarFooter select:disabled { opacity: 0.55; }
-  /* ---------------- 主区域 ---------------- */
+  .nav-item {
+    display: block;
+    width: 100%;
+    padding: 7px 16px;
+    border: none;
+    background: transparent;
+    color: var(--vscode-foreground);
+    text-align: left;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .nav-item:hover { background: var(--vscode-list-hoverBackground); }
+  .nav-item.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
   #main { flex: 1; overflow-y: auto; padding: 20px 28px; }
   h2 { margin: 0 0 4px; font-size: 16px; }
   .desc { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 18px; }
@@ -116,7 +128,6 @@ export function getSettingsHtml(nonce: string): string {
     outline: none;
   }
   input:focus, select:focus { border-color: var(--vscode-focusBorder); }
-  /* 模型 chips */
   #modelChips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   .chip {
     display: inline-flex;
@@ -129,15 +140,20 @@ export function getSettingsHtml(nonce: string): string {
     font-size: 12px;
   }
   .chip.active { outline: 1px solid #4caf50; }
-  .chip .use {
+  .chip-meta { font-size: 10px; opacity: 0.9; }
+  .chip .remove {
     border: none; background: transparent; cursor: pointer;
-    color: inherit; font-size: 11px; padding: 0;
-    text-decoration: underline;
+    color: inherit; font-size: 13px; padding: 0; line-height: 1;
   }
-  .chip .remove { border: none; background: transparent; cursor: pointer; color: inherit; font-size: 13px; padding: 0; line-height: 1; }
-  #modelAddRow { display: flex; gap: 6px; max-width: 560px; }
-  #modelAddRow input { flex: 1; }
-  /* 按钮 */
+  #modelAddRow { display: flex; gap: 6px; max-width: 560px; flex-wrap: wrap; align-items: center; }
+  #modelAddRow input { flex: 1; min-width: 120px; }
+  #modelContextInput { max-width: 150px; }
+  #modelAddHint {
+    width: 100%;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin-top: 2px;
+  }
   .btn-row { display: flex; gap: 8px; margin-top: 18px; align-items: center; flex-wrap: wrap; }
   button.primary {
     padding: 7px 16px; border: none; border-radius: 2px; cursor: pointer; font-size: 13px;
@@ -159,21 +175,6 @@ export function getSettingsHtml(nonce: string): string {
   #message.error { color: var(--vscode-errorForeground, #f48771); }
   #empty { color: var(--vscode-descriptionForeground); margin-top: 40px; text-align: center; }
   .hidden { display: none !important; }
-  /* 侧边栏导航 */
-  .nav-item {
-    display: block;
-    width: 100%;
-    padding: 7px 16px;
-    border: none;
-    background: transparent;
-    color: var(--vscode-foreground);
-    text-align: left;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  .nav-item:hover { background: var(--vscode-list-hoverBackground); }
-  .nav-item.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
-  /* 生成设置 */
   #promptView { max-width: 720px; }
   #promptView textarea {
     width: 100%;
@@ -190,7 +191,7 @@ export function getSettingsHtml(nonce: string): string {
     outline: none;
   }
   #promptView textarea:focus { border-color: var(--vscode-focusBorder); }
-  #promptStatus {
+  #promptStatusLabel {
     font-size: 11px;
     color: var(--vscode-descriptionForeground);
     margin: 6px 0 0;
@@ -228,7 +229,7 @@ export function getSettingsHtml(nonce: string): string {
 
     <div id="form" class="hidden">
       <h2 id="formTitle">添加模型供应商</h2>
-      <div class="desc">配置一个自定义的 API 端点和模型列表,保存后可在生成提交信息时使用。</div>
+      <div class="desc">配置 API 端点与模型列表。当前使用的供应商/模型请在左侧底部选择；添加模型不会自动切换当前模型。</div>
 
       <div class="field">
         <label>名称</label>
@@ -254,14 +255,15 @@ export function getSettingsHtml(nonce: string): string {
         <label>模型列表</label>
         <div id="modelChips"></div>
         <div id="modelAddRow">
-          <input type="text" id="modelInput" placeholder="输入模型 id,如 glm-4.5">
+          <input type="text" id="modelInput" placeholder="模型 id,如 deepseek-v4-flash">
+          <input type="text" id="modelContextInput" inputmode="numeric" placeholder="上下文 tokens">
           <button class="secondary" id="addModelBtn">＋ 添加模型</button>
         </div>
+        <div id="modelAddHint">每个模型单独设置上下文大小，默认 1M tokens。添加后需点「保存修改」。</div>
       </div>
 
       <div class="btn-row">
         <button class="primary" id="saveBtn">保存供应商</button>
-        <button class="secondary hidden" id="setActiveBtn">设为当前</button>
         <button class="secondary" id="testBtn">测试连接</button>
         <button class="danger hidden" id="deleteBtn">删除供应商</button>
       </div>
@@ -271,9 +273,9 @@ export function getSettingsHtml(nonce: string): string {
     <div id="promptView" class="hidden">
       <h2>生成设置</h2>
       <div class="desc">
-        选择提交信息语言，并自定义对应的 System Prompt。
+        配置提交信息语言与 System Prompt。
         生成时使用此处所选语言；diff 与文件列表仍由插件自动拼入 user 消息。
-        中文 / 英文可分别配置；留空保存等价于恢复默认。
+        各模型的上下文大小请在「模型列表」添加时配置。
       </div>
 
       <div class="field">
@@ -287,7 +289,7 @@ export function getSettingsHtml(nonce: string): string {
       <div class="field">
         <label>System Prompt</label>
         <textarea id="systemPromptInput" spellcheck="false"></textarea>
-        <div id="promptStatus">使用内置默认</div>
+        <div id="promptStatusLabel">使用内置默认</div>
       </div>
 
       <div class="btn-row">
@@ -300,6 +302,7 @@ export function getSettingsHtml(nonce: string): string {
 
 <script nonce="${nonce}">
 var API_FORMATS = ${formatsJson};
+var DEFAULT_CONTEXT_SIZE = ${defaultContextSize};
 
 var vscode = acquireVsCodeApi();
 var state = {
@@ -309,10 +312,12 @@ var state = {
   commitLanguage: 'zh-CN',
   systemPrompts: {},
   systemPromptCustomized: {},
-  defaultSystemPrompts: {}
+  defaultSystemPrompts: {},
+  defaultContextSize: DEFAULT_CONTEXT_SIZE
 };
+// form.models: [{ id, contextSize }]
 var mode = 'empty'; // 'add' | 'edit' | 'empty' | 'prompt'
-var form = null;    // { id, name, baseUrl, apiFormat, models: [] }
+var form = null;
 var testing = false;
 var promptLanguage = 'zh-CN';
 var promptDirty = false;
@@ -322,6 +327,35 @@ function el(id) { return document.getElementById(id); }
 function esc(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+function modelIdOf(m) { return typeof m === 'string' ? m : (m && m.id ? m.id : ''); }
+function modelContextOf(m) {
+  if (typeof m === 'string') { return DEFAULT_CONTEXT_SIZE; }
+  var n = m && m.contextSize;
+  return n && n > 0 ? n : DEFAULT_CONTEXT_SIZE;
+}
+function formatContextSize(n) {
+  var v = Number(n) || 0;
+  if (v >= 1000000) {
+    var m = v / 1000000;
+    return (Number.isInteger(m) ? m : m.toFixed(1)) + 'M';
+  }
+  if (v >= 1000) {
+    var k = v / 1000;
+    return (Number.isInteger(k) ? k : k.toFixed(1)) + 'K';
+  }
+  return String(v);
+}
+function normalizeModels(list) {
+  return (list || []).map(function (m) {
+    return { id: modelIdOf(m), contextSize: modelContextOf(m) };
+  }).filter(function (m) { return m.id; });
+}
+function findModelIndex(id) {
+  for (var i = 0; i < form.models.length; i++) {
+    if (form.models[i].id === id) { return i; }
+  }
+  return -1;
+}
 
 function showMessage(text, ok) {
   var m = el('message');
@@ -329,14 +363,12 @@ function showMessage(text, ok) {
   m.className = ok ? 'ok' : 'error';
   if (!text) { m.className = ''; }
 }
-
 function showPromptMessage(text, ok) {
   var m = el('promptMessage');
   m.textContent = text || '';
   m.className = ok ? 'ok' : 'error';
   if (!text) { m.className = ''; }
 }
-
 function showMainView(view) {
   el('empty').classList.toggle('hidden', view !== 'empty');
   el('form').classList.toggle('hidden', view !== 'form');
@@ -344,13 +376,11 @@ function showMainView(view) {
   el('promptNavBtn').classList.toggle('selected', view === 'prompt');
 }
 
-/* ------------------------- 渲染 ------------------------- */
-
 function renderSidebar() {
   var list = el('providerList');
   var html = '';
   state.providers.forEach(function (p) {
-    var usable = p.hasApiKey && p.models.length > 0;
+    var usable = p.hasApiKey && p.models && p.models.length > 0;
     html += '<button class="provider-item' + (mode !== 'prompt' && form && form.id === p.id ? ' selected' : '') + '" data-id="' + esc(p.id) + '">'
       + '<span class="dot ' + (usable ? 'ok' : 'missing') + '"></span>'
       + '<span class="name">' + esc(p.name) + '</span>'
@@ -361,12 +391,10 @@ function renderSidebar() {
   Array.prototype.forEach.call(list.children, function (child) {
     child.addEventListener('click', function () { selectProvider(child.getAttribute('data-id')); });
   });
-
   renderActiveSelects();
   el('promptNavBtn').classList.toggle('selected', mode === 'prompt');
 }
 
-/** 底部「当前供应商 / 当前模型」下拉 */
 function renderActiveSelects() {
   var providerSelect = el('activeProviderSelect');
   var modelSelect = el('activeModelSelect');
@@ -393,22 +421,21 @@ function renderActiveSelects() {
   var selectedProvider = state.providers.filter(function (p) {
     return p.id === providerSelect.value;
   })[0];
-  var models = selectedProvider ? selectedProvider.models : [];
+  var models = selectedProvider ? normalizeModels(selectedProvider.models) : [];
   var modelHtml = '';
   if (!selectedProvider || models.length === 0) {
     modelHtml = '<option value="">未配置</option>';
   } else {
     models.forEach(function (m) {
-      modelHtml += '<option value="' + esc(m) + '">' + esc(m) + '</option>';
+      modelHtml += '<option value="' + esc(m.id) + '">' + esc(m.id) + ' (' + formatContextSize(m.contextSize) + ')</option>';
     });
   }
   modelSelect.innerHTML = modelHtml;
   modelSelect.disabled = models.length === 0;
 
   if (models.length > 0) {
-    if (state.activeModel && models.indexOf(state.activeModel) >= 0 && selectedProvider && selectedProvider.id === state.activeProviderId) {
-      modelSelect.value = state.activeModel;
-    } else if (state.activeModel && models.indexOf(state.activeModel) >= 0) {
+    var ids = models.map(function (m) { return m.id; });
+    if (state.activeModel && ids.indexOf(state.activeModel) >= 0) {
       modelSelect.value = state.activeModel;
     } else {
       modelSelect.selectedIndex = 0;
@@ -429,51 +456,20 @@ function renderForm() {
   el('baseUrlInput').value = form.baseUrl;
   el('apiFormatSelect').value = form.apiFormat;
   el('apiKeyInput').value = '';
+  el('modelContextInput').value = String(state.defaultContextSize || DEFAULT_CONTEXT_SIZE);
 
   var saved = isEdit ? state.providers.filter(function (p) { return p.id === form.id; })[0] : null;
   el('apiKeyInput').placeholder = saved && saved.hasApiKey ? '已保存,留空表示不修改' : '输入 API Key';
 
-  updateSetActiveBtn();
   renderModels();
   renderSidebar();
   showMessage('');
 }
 
-/** 更新「设为当前」按钮状态 */
-function updateSetActiveBtn() {
-  var btn = el('setActiveBtn');
-  var isEdit = mode === 'edit' && form && form.id;
-  btn.classList.toggle('hidden', !isEdit);
-  if (!isEdit) { return; }
-
-  var isActive = form.id === state.activeProviderId;
-  var hasModel = form.models && form.models.length > 0;
-  if (isActive) {
-    btn.textContent = '✓ 当前使用中';
-    btn.disabled = true;
-  } else {
-    btn.textContent = '设为当前';
-    btn.disabled = !hasModel;
-  }
-}
-
-/** 将当前编辑的供应商设为激活(模型优先沿用已选,否则取列表第一个) */
-function setCurrentProvider() {
-  if (!form || !form.id) { return; }
-  if (!form.models || form.models.length === 0) {
-    showMessage('请先添加至少一个模型', false);
-    return;
-  }
-  var model = form.models.indexOf(state.activeModel) >= 0
-    ? state.activeModel
-    : form.models[0];
-  vscode.postMessage({ type: 'setActive', providerId: form.id, model: model });
-}
-
 function updatePromptStatus() {
   var customized = !!(state.systemPromptCustomized && state.systemPromptCustomized[promptLanguage]);
   var dirtyHint = promptDirty ? ' · 未保存' : '';
-  el('promptStatus').textContent = (customized ? '已自定义' : '使用内置默认') + dirtyHint;
+  el('promptStatusLabel').textContent = (customized ? '已自定义' : '使用内置默认') + dirtyHint;
 }
 
 function renderPromptView(forceText) {
@@ -494,36 +490,34 @@ function renderModels() {
   var wrap = el('modelChips');
   var html = '';
   form.models.forEach(function (m) {
-    var isActive = mode === 'edit' && form.id === state.activeProviderId && m === state.activeModel;
-    html += '<span class="chip' + (isActive ? ' active' : '') + '" data-model="' + esc(m) + '">'
-      + esc(m)
-      + (mode === 'edit' ? '<button class="use" data-action="use" title="设为当前使用的模型">' + (isActive ? '✓ 使用中' : '使用') + '</button>' : '')
-      + '<button class="remove" data-action="remove" title="移除">×</button>'
+    var isActive = mode === 'edit' && form.id === state.activeProviderId && m.id === state.activeModel;
+    html += '<span class="chip' + (isActive ? ' active' : '') + '" data-model="' + esc(m.id) + '">'
+      + esc(m.id)
+      + '<span class="chip-meta">' + formatContextSize(m.contextSize) + '</span>'
+      + '<button class="remove" data-action="remove" title="从列表移除">×</button>'
       + '</span>';
   });
   wrap.innerHTML = html;
   Array.prototype.forEach.call(wrap.querySelectorAll('button'), function (btn) {
     btn.addEventListener('click', function () {
       var model = btn.parentElement.getAttribute('data-model');
-      if (btn.getAttribute('data-action') === 'remove') {
-        form.models = form.models.filter(function (m) { return m !== model; });
-        renderModels();
-        updateSetActiveBtn();
-      } else {
-        vscode.postMessage({ type: 'setActive', providerId: form.id, model: model });
-      }
+      form.models = form.models.filter(function (m) { return m.id !== model; });
+      renderModels();
     });
   });
-  updateSetActiveBtn();
 }
-
-/* ------------------------- 交互 ------------------------- */
 
 function selectProvider(id) {
   var p = state.providers.filter(function (x) { return x.id === id; })[0];
   if (!p) { return; }
   mode = 'edit';
-  form = { id: p.id, name: p.name, baseUrl: p.baseUrl, apiFormat: p.apiFormat, models: p.models.slice() };
+  form = {
+    id: p.id,
+    name: p.name,
+    baseUrl: p.baseUrl,
+    apiFormat: p.apiFormat,
+    models: normalizeModels(p.models)
+  };
   promptDirty = false;
   renderForm();
 }
@@ -545,10 +539,17 @@ function readFormInputs() {
 
 function validate() {
   if (!form.name) { return '请填写名称'; }
-  // 使用 RegExp 构造函数,避免模板字符串把 \\/ 吃成 / 导致 webview 脚本语法错误
   if (!new RegExp('^https?://').test(form.baseUrl)) { return 'Base URL 必须以 http:// 或 https:// 开头'; }
   if (form.models.length === 0) { return '请至少添加一个模型'; }
   return null;
+}
+
+function parseContextInput(raw) {
+  var cleaned = String(raw || '').replace(/[,_\\s]/g, '');
+  if (!cleaned) { return DEFAULT_CONTEXT_SIZE; }
+  var n = parseInt(cleaned, 10);
+  if (isNaN(n) || n <= 0) { return null; }
+  return n;
 }
 
 function bindEvents() {
@@ -565,17 +566,16 @@ function bindEvents() {
 
   el('addModelBtn').addEventListener('click', function () {
     var value = el('modelInput').value.trim();
-    if (!value) { return; }
-    if (form.models.indexOf(value) >= 0) { showMessage('模型已存在: ' + value, false); return; }
-    form.models.push(value);
+    if (!value) { showMessage('请输入模型 id', false); return; }
+    if (findModelIndex(value) >= 0) { showMessage('模型已存在: ' + value, false); return; }
+    var ctx = parseContextInput(el('modelContextInput').value);
+    if (ctx === null) { showMessage('请输入有效的上下文大小(正整数 tokens)', false); return; }
+    // 只加入列表,不切换当前模型
+    form.models.push({ id: value, contextSize: ctx });
     el('modelInput').value = '';
+    el('modelContextInput').value = String(state.defaultContextSize || DEFAULT_CONTEXT_SIZE);
     renderModels();
-    updateSetActiveBtn();
-    showMessage('');
-  });
-
-  el('setActiveBtn').addEventListener('click', function () {
-    setCurrentProvider();
+    showMessage('已加入模型列表,保存后生效。当前模型不会自动切换。', true);
   });
 
   el('activeProviderSelect').addEventListener('change', function () {
@@ -583,13 +583,13 @@ function bindEvents() {
     var providerId = el('activeProviderSelect').value;
     if (!providerId) { return; }
     var provider = state.providers.filter(function (p) { return p.id === providerId; })[0];
-    if (!provider || provider.models.length === 0) {
+    var models = provider ? normalizeModels(provider.models) : [];
+    if (!provider || models.length === 0) {
       renderActiveSelects();
       return;
     }
-    var model = provider.models.indexOf(state.activeModel) >= 0
-      ? state.activeModel
-      : provider.models[0];
+    var ids = models.map(function (m) { return m.id; });
+    var model = ids.indexOf(state.activeModel) >= 0 ? state.activeModel : models[0].id;
     vscode.postMessage({ type: 'setActive', providerId: providerId, model: model });
   });
 
@@ -604,6 +604,9 @@ function bindEvents() {
   el('modelInput').addEventListener('keydown', function (e) {
     if (e.key === 'Enter') { e.preventDefault(); el('addModelBtn').click(); }
   });
+  el('modelContextInput').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); el('addModelBtn').click(); }
+  });
 
   el('saveBtn').addEventListener('click', function () {
     readFormInputs();
@@ -612,21 +615,34 @@ function bindEvents() {
     var apiKey = el('apiKeyInput').value;
     vscode.postMessage({
       type: 'saveProvider',
-      provider: { id: form.id, name: form.name, baseUrl: form.baseUrl, apiFormat: form.apiFormat, models: form.models },
+      provider: {
+        id: form.id,
+        name: form.name,
+        baseUrl: form.baseUrl,
+        apiFormat: form.apiFormat,
+        models: form.models
+      },
       apiKey: apiKey ? apiKey : undefined
     });
   });
 
   el('deleteBtn').addEventListener('click', function () {
-    if (confirm('确定删除供应商「' + form.name + '」?该操作会同时删除已保存的 API Key。')) {
+    var isActive = form.id === state.activeProviderId;
+    var tip = isActive
+      ? '确定删除当前使用的供应商「' + form.name + '」？将同时删除已保存的 API Key，并自动切换到其他供应商。'
+      : '确定删除供应商「' + form.name + '」？该操作会同时删除已保存的 API Key。';
+    if (confirm(tip)) {
       vscode.postMessage({ type: 'deleteProvider', id: form.id });
+      mode = 'empty';
+      form = null;
+      showMainView('empty');
     }
   });
 
   el('testBtn').addEventListener('click', function () {
     readFormInputs();
     if (!form.baseUrl) { showMessage('请先填写 Base URL', false); return; }
-    var model = form.models[0] || (form.id === state.activeProviderId ? state.activeModel : null);
+    var model = form.models[0] ? form.models[0].id : null;
     if (!model) { showMessage('请先添加至少一个模型', false); return; }
     testing = true;
     el('testBtn').disabled = true;
@@ -647,7 +663,6 @@ function bindEvents() {
     promptLanguage = el('promptLanguageSelect').value;
     promptDirty = false;
     showPromptMessage('');
-    // 切换语言即设为生成时使用的语言
     vscode.postMessage({ type: 'setLanguage', language: promptLanguage });
     renderPromptView(true);
   });
@@ -671,21 +686,18 @@ function bindEvents() {
   });
 }
 
-/* ------------------------- 消息 ------------------------- */
-
 window.addEventListener('message', function (event) {
   var msg = event.data;
   if (msg.type === 'state') {
     state = msg.state;
     if (mode === 'edit' && form) {
-      // 供应商可能在别处被删除;否则只刷新激活高亮,不覆盖本地未保存的编辑
       var saved = state.providers.filter(function (p) { return p.id === form.id; })[0];
       if (!saved) {
         mode = 'empty'; form = null;
         showMainView('empty');
       } else {
+        // 不覆盖本地未保存编辑;只刷新当前高亮
         renderModels();
-        updateSetActiveBtn();
       }
     } else if (mode === 'prompt') {
       promptDirty = false;
@@ -716,8 +728,6 @@ window.addEventListener('message', function (event) {
   }
 });
 
-/* ------------------------- 初始化 ------------------------- */
-
 (function init() {
   var fmt = el('apiFormatSelect');
   API_FORMATS.forEach(function (f) {
@@ -726,6 +736,7 @@ window.addEventListener('message', function (event) {
     opt.textContent = f.label;
     fmt.appendChild(opt);
   });
+  el('modelContextInput').value = String(DEFAULT_CONTEXT_SIZE);
   bindEvents();
   vscode.postMessage({ type: 'ready' });
 })();

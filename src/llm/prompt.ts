@@ -1,4 +1,4 @@
-import { DIFF_LIMITS } from '../constants';
+import { DIFF_LIMITS, maxDiffCharsFromContext } from '../constants';
 import type { CommitLanguage, GitChange } from '../types';
 
 export interface ChatMessage {
@@ -143,9 +143,15 @@ function statusText(status: number, language: CommitLanguage): string {
   }
 }
 
-function buildUserPrompt(changes: GitChange[], language: CommitLanguage): string {
+function buildUserPrompt(
+  changes: GitChange[],
+  language: CommitLanguage,
+  maxTotalChars?: number,
+): string {
   const zh = language !== 'en-US';
-  let budget = DIFF_LIMITS.MAX_TOTAL_CHARS;
+  let budget = maxTotalChars && maxTotalChars > 0
+    ? maxTotalChars
+    : DIFF_LIMITS.MAX_TOTAL_CHARS;
   const parts: string[] = [];
 
   for (const change of changes) {
@@ -172,15 +178,20 @@ function buildUserPrompt(changes: GitChange[], language: CommitLanguage): string
 /**
  * 构造生成提交信息的 system + user 消息。
  * customSystemPrompt 非空时覆盖对应语言的内置 system 提示词;user 消息(含 diff)始终由系统组装。
+ * contextSize(tokens) 用于估算可送入的 diff 字符预算。
  */
 export function buildPrompt(
   changes: GitChange[],
   language: CommitLanguage,
   customSystemPrompt?: string | null,
+  contextSize?: number,
 ): ChatMessage[] {
+  const maxChars = contextSize !== undefined
+    ? maxDiffCharsFromContext(contextSize)
+    : DIFF_LIMITS.MAX_TOTAL_CHARS;
   return [
     { role: 'system', content: resolveSystemPrompt(language, customSystemPrompt) },
-    { role: 'user', content: buildUserPrompt(changes, language) },
+    { role: 'user', content: buildUserPrompt(changes, language, maxChars) },
   ];
 }
 

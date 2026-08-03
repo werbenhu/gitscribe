@@ -41,7 +41,7 @@ jobs:
       - name: Upload .vsix as workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: gitscribe-${{ steps.version.outputs.version }}-vsix
+          name: git-commit-scribe-${{ steps.version.outputs.version }}-vsix
           path: '*.vsix'
           if-no-files-found: error
 

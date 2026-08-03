@@ -33,7 +33,12 @@ export async function generateCommitMessage(
   changes: GitChange[],
   config: ResolvedConfig,
 ): Promise<string> {
-  const messages = buildPrompt(changes, config.language, config.systemPrompt);
+  const messages = buildPrompt(
+    changes,
+    config.language,
+    config.systemPrompt,
+    config.contextSize,
+  );
   const raw = await callProvider(config, messages);
   const message = sanitizeCommitMessage(raw);
   if (!message) {

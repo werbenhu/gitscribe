@@ -1,5 +1,5 @@
 {
-  "name": "gitscribe",
+  "name": "git-commit-scribe",
   "displayName": "Git Scribe",
   "description": "AI-powered Git commit message generator",
   "version": "1.0.0",
@@ -33,7 +33,7 @@
   "contributes": {
     "commands": [
       {
-        "command": "gitscribe.generate",
+        "command": "gitCommitScribe.generate",
         "title": "Git Scribe: 生成提交信息",
         "icon": {
           "light": "resources/icon-light.png",
@@ -41,7 +41,7 @@
         }
       },
       {
-        "command": "gitscribe.openSettings",
+        "command": "gitCommitScribe.openSettings",
         "title": "Git Scribe: 配置模型供应商",
         "icon": {
           "light": "resources/icon-light.png",
@@ -51,7 +51,7 @@
     ],
     "keybindings": [
       {
-        "command": "gitscribe.generate",
+        "command": "gitCommitScribe.generate",
         "key": "ctrl+alt+g",
         "mac": "cmd+alt+g",
         "when": "scmProvider == git"
@@ -60,14 +60,14 @@
     "menus": {
       "scm/title": [
         {
-          "command": "gitscribe.generate",
+          "command": "gitCommitScribe.generate",
           "when": "scmProvider == git",
           "group": "navigation@1"
         }
       ],
       "scm/sourceControl": [
         {
-          "command": "gitscribe.openSettings",
+          "command": "gitCommitScribe.openSettings",
           "when": "scmProvider == git",
           "group": "2_modifications@1"
         }

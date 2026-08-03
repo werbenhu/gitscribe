@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { generateId, ProviderStore } from '../config/providerStore';
+import { CONTEXT_DEFAULTS, normalizeContextSize } from '../constants';
 import { testConnection } from '../llm/client';
-import type { ApiFormat, CommitLanguage, Provider } from '../types';
+import type { ApiFormat, CommitLanguage, ModelConfig, Provider } from '../types';
 import { getSettingsHtml } from './settingsHtml';
 
 interface SaveProviderMessage {
@@ -11,7 +12,7 @@ interface SaveProviderMessage {
     name: string;
     baseUrl: string;
     apiFormat: ApiFormat;
-    models: string[];
+    models: ModelConfig[];
   };
   apiKey?: string;
 }
@@ -45,7 +46,7 @@ export class SettingsPanel {
       return;
     }
     const panel = vscode.window.createWebviewPanel(
-      'gitscribeSettings',
+      'gitCommitScribeSettings',
       'Git Scribe 设置',
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true },
@@ -124,6 +125,12 @@ export class SettingsPanel {
       await this.post({ type: 'saveResult', ok: false, error: '请至少添加一个模型' });
       return;
     }
+    for (const m of models) {
+      if (!m.id?.trim()) {
+        await this.post({ type: 'saveResult', ok: false, error: '模型 id 不能为空' });
+        return;
+      }
+    }
 
     const id = message.provider.id ?? generateId();
     const provider: Provider = {
@@ -131,7 +138,10 @@ export class SettingsPanel {
       name: name.trim(),
       baseUrl: baseUrl.trim(),
       apiFormat,
-      models,
+      models: models.map((m) => ({
+        id: m.id.trim(),
+        contextSize: normalizeContextSize(m.contextSize),
+      })),
     };
     await this.store.saveProvider(provider, message.apiKey);
     await this.pushState();
@@ -158,11 +168,12 @@ export class SettingsPanel {
           name: message.provider.name,
           baseUrl: message.provider.baseUrl,
           apiFormat: message.provider.apiFormat,
-          models: [message.model],
+          models: [{ id: message.model, contextSize: CONTEXT_DEFAULTS.CONTEXT_SIZE }],
         },
         apiKey,
         model: message.model,
         language: this.store.getCommitLanguage(),
+        contextSize: CONTEXT_DEFAULTS.CONTEXT_SIZE,
       });
       await reply(true, `连接成功 ✓(${message.model})`);
     } catch (error) {

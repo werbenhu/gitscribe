@@ -5,6 +5,14 @@
 /** 供应商 API 格式 */
 export type ApiFormat = 'openai-chat' | 'openai-responses' | 'anthropic';
 
+/** 供应商下的单个模型配置 */
+export interface ModelConfig {
+  /** 模型 id,如 deepseek-v4-flash */
+  id: string;
+  /** 该模型上下文大小(tokens),默认 1M */
+  contextSize: number;
+}
+
 /** 模型供应商配置(API Key 单独存 SecretStorage,不在此结构中) */
 export interface Provider {
   /** 随机生成的唯一 id */
@@ -15,8 +23,8 @@ export interface Provider {
   baseUrl: string;
   /** API 格式 */
   apiFormat: ApiFormat;
-  /** 模型 id 列表 */
-  models: string[];
+  /** 模型列表(含各自上下文大小) */
+  models: ModelConfig[];
 }
 
 /** 提交信息语言 */
@@ -53,6 +61,8 @@ export interface WebviewState {
   systemPromptCustomized: Record<CommitLanguage, boolean>;
   /** 各语言内置默认提示词(供「恢复默认」使用) */
   defaultSystemPrompts: Record<CommitLanguage, string>;
+  /** 新增模型时的默认上下文大小 */
+  defaultContextSize: number;
 }
 
 /** 一次生成请求所需的完整解析后配置 */
@@ -63,6 +73,8 @@ export interface ResolvedConfig {
   language: CommitLanguage;
   /** 自定义 system 提示词;空则使用内置默认 */
   systemPrompt?: string | null;
+  /** 当前模型的上下文大小(tokens),用于估算 diff 预算 */
+  contextSize: number;
 }
 
 /** Git 变更状态(vscode.git API 的 Status 数值子集) */
