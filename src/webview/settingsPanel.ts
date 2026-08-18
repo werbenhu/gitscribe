@@ -79,6 +79,9 @@ export class SettingsPanel {
           await this.handleSave(message);
           break;
         case 'deleteProvider':
+          if (!message.id) {
+            break;
+          }
           await this.store.deleteProvider(message.id);
           await this.pushState();
           break;

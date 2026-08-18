@@ -76,7 +76,7 @@ npx vsce package --no-dependencies
 Install with **Extensions: Install from VSIX...**, or:
 
 ```bash
-code --install-extension git-commit-scribe-1.0.1.vsix
+code --install-extension git-commit-scribe-1.0.2.vsix
 ```
 
 ## Technical notes

@@ -199,6 +199,33 @@ export function getSettingsHtml(nonce: string): string {
   #promptMessage { margin-top: 12px; font-size: 12px; min-height: 16px; }
   #promptMessage.ok { color: #4caf50; }
   #promptMessage.error { color: var(--vscode-errorForeground, #f48771); }
+  #confirmOverlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+  .confirm-dialog {
+    width: min(420px, calc(100% - 40px));
+    padding: 16px 18px;
+    border-radius: 6px;
+    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+    color: var(--vscode-editorWidget-foreground, var(--vscode-foreground));
+    border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border, #3c3c3c));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  .confirm-dialog .confirm-text {
+    font-size: 13px;
+    line-height: 1.55;
+    margin-bottom: 16px;
+  }
+  .confirm-dialog .btn-row {
+    margin-top: 0;
+    justify-content: flex-end;
+  }
 </style>
 </head>
 <body>
@@ -263,9 +290,9 @@ export function getSettingsHtml(nonce: string): string {
       </div>
 
       <div class="btn-row">
-        <button class="primary" id="saveBtn">保存供应商</button>
-        <button class="secondary" id="testBtn">测试连接</button>
-        <button class="danger hidden" id="deleteBtn">删除供应商</button>
+        <button type="button" class="primary" id="saveBtn">保存供应商</button>
+        <button type="button" class="secondary" id="testBtn">测试连接</button>
+        <button type="button" class="danger hidden" id="deleteBtn">删除供应商</button>
       </div>
       <div id="message"></div>
     </div>
@@ -300,6 +327,16 @@ export function getSettingsHtml(nonce: string): string {
     </div>
   </div>
 
+  <div id="confirmOverlay" class="hidden" role="dialog" aria-modal="true" aria-labelledby="confirmText">
+    <div class="confirm-dialog">
+      <div class="confirm-text" id="confirmText"></div>
+      <div class="btn-row">
+        <button type="button" class="secondary" id="confirmCancel">取消</button>
+        <button type="button" class="danger" id="confirmOk">确定</button>
+      </div>
+    </div>
+  </div>
+
 <script nonce="${nonce}">
 var API_FORMATS = ${formatsJson};
 var DEFAULT_CONTEXT_SIZE = ${defaultContextSize};
@@ -322,6 +359,8 @@ var testing = false;
 var promptLanguage = 'zh-CN';
 var promptDirty = false;
 var syncingActiveSelects = false;
+var confirmOnOk = null;
+var confirmOnCancel = null;
 
 function el(id) { return document.getElementById(id); }
 function esc(s) {
@@ -374,6 +413,31 @@ function showMainView(view) {
   el('form').classList.toggle('hidden', view !== 'form');
   el('promptView').classList.toggle('hidden', view !== 'prompt');
   el('promptNavBtn').classList.toggle('selected', view === 'prompt');
+}
+
+function resolveConfirm(ok) {
+  var onOk = confirmOnOk;
+  var onCancel = confirmOnCancel;
+  confirmOnOk = null;
+  confirmOnCancel = null;
+  el('confirmOverlay').classList.add('hidden');
+  if (ok) {
+    if (onOk) { onOk(); }
+  } else if (onCancel) {
+    onCancel();
+  }
+}
+
+/** VS Code webview 不支持 window.confirm，用面板内对话框替代。 */
+function askConfirm(text, onOk, options) {
+  options = options || {};
+  confirmOnOk = onOk || null;
+  confirmOnCancel = options.onCancel || null;
+  el('confirmText').textContent = text;
+  el('confirmOk').textContent = options.okText || '确定';
+  el('confirmOk').className = options.danger ? 'danger' : 'primary';
+  el('confirmOverlay').classList.remove('hidden');
+  el('confirmOk').focus();
 }
 
 function renderSidebar() {
@@ -627,16 +691,19 @@ function bindEvents() {
   });
 
   el('deleteBtn').addEventListener('click', function () {
-    var isActive = form.id === state.activeProviderId;
+    if (!form || !form.id) { return; }
+    var providerId = form.id;
+    var isActive = providerId === state.activeProviderId;
     var tip = isActive
       ? '确定删除当前使用的供应商「' + form.name + '」？将同时删除已保存的 API Key，并自动切换到其他供应商。'
       : '确定删除供应商「' + form.name + '」？该操作会同时删除已保存的 API Key。';
-    if (confirm(tip)) {
-      vscode.postMessage({ type: 'deleteProvider', id: form.id });
+    askConfirm(tip, function () {
+      vscode.postMessage({ type: 'deleteProvider', id: providerId });
       mode = 'empty';
       form = null;
       showMainView('empty');
-    }
+      renderSidebar();
+    }, { danger: true, okText: '删除' });
   });
 
   el('testBtn').addEventListener('click', function () {
@@ -656,15 +723,23 @@ function bindEvents() {
   });
 
   el('promptLanguageSelect').addEventListener('change', function () {
-    if (promptDirty && !confirm('当前 System Prompt 有未保存修改，切换语言将丢弃这些修改。继续？')) {
-      el('promptLanguageSelect').value = promptLanguage;
+    var next = el('promptLanguageSelect').value;
+    function applyLanguage() {
+      promptLanguage = next;
+      promptDirty = false;
+      showPromptMessage('');
+      vscode.postMessage({ type: 'setLanguage', language: promptLanguage });
+      renderPromptView(true);
+    }
+    if (!promptDirty) {
+      applyLanguage();
       return;
     }
-    promptLanguage = el('promptLanguageSelect').value;
-    promptDirty = false;
-    showPromptMessage('');
-    vscode.postMessage({ type: 'setLanguage', language: promptLanguage });
-    renderPromptView(true);
+    el('promptLanguageSelect').value = promptLanguage;
+    askConfirm('当前 System Prompt 有未保存修改，切换语言将丢弃这些修改。继续？', function () {
+      el('promptLanguageSelect').value = next;
+      applyLanguage();
+    });
   });
 
   el('systemPromptInput').addEventListener('input', function () {
@@ -681,8 +756,25 @@ function bindEvents() {
   });
 
   el('resetPromptBtn').addEventListener('click', function () {
-    if (!confirm('确定恢复该语言的内置默认 System Prompt？')) { return; }
-    vscode.postMessage({ type: 'resetSystemPrompt', language: promptLanguage });
+    askConfirm('确定恢复该语言的内置默认 System Prompt？', function () {
+      vscode.postMessage({ type: 'resetSystemPrompt', language: promptLanguage });
+    });
+  });
+
+  el('confirmOk').addEventListener('click', function () { resolveConfirm(true); });
+  el('confirmCancel').addEventListener('click', function () { resolveConfirm(false); });
+  el('confirmOverlay').addEventListener('click', function (e) {
+    if (e.target === el('confirmOverlay')) { resolveConfirm(false); }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (el('confirmOverlay').classList.contains('hidden')) { return; }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      resolveConfirm(false);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      resolveConfirm(true);
+    }
   });
 }
 
