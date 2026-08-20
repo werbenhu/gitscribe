@@ -32,6 +32,8 @@ type WebviewMessage =
   | { type: 'setLanguage'; language: CommitLanguage }
   | { type: 'saveSystemPrompt'; language: CommitLanguage; prompt: string }
   | { type: 'resetSystemPrompt'; language: CommitLanguage }
+  | { type: 'setDebugLlmLog'; enabled: boolean }
+  | { type: 'clearLlmSessions' }
   | TestConnectionMessage;
 
 /** 设置面板(单例):多供应商管理界面 */
@@ -43,6 +45,8 @@ export class SettingsPanel {
   static show(store: ProviderStore): void {
     if (SettingsPanel.current) {
       SettingsPanel.current.panel.reveal(vscode.ViewColumn.One);
+      // 面板已打开时也刷新,否则刚写入的会话记录看不到
+      void SettingsPanel.current.pushState();
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -52,6 +56,13 @@ export class SettingsPanel {
       { enableScripts: true, retainContextWhenHidden: true },
     );
     SettingsPanel.current = new SettingsPanel(panel, store);
+  }
+
+  /** 生成结束后刷新已打开的设置页(会话列表等) */
+  static refreshIfOpen(): void {
+    if (SettingsPanel.current) {
+      void SettingsPanel.current.pushState();
+    }
   }
 
   private constructor(
@@ -102,6 +113,14 @@ export class SettingsPanel {
           await this.store.setSystemPrompt(message.language, null);
           await this.pushState();
           await this.post({ type: 'promptResult', ok: true, message: '已恢复默认 System Prompt ✓' });
+          break;
+        case 'setDebugLlmLog':
+          await this.store.setDebugLlmLogEnabled(Boolean(message.enabled));
+          await this.pushState();
+          break;
+        case 'clearLlmSessions':
+          await this.store.clearLlmSessions();
+          await this.pushState();
           break;
         case 'testConnection':
           await this.handleTest(message);

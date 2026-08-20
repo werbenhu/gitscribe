@@ -15,7 +15,7 @@
   - Anthropic Messages（`/v1/messages`）— 含 Anthropic 兼容网关
 - **按模型配置上下文**：每个模型独立设置上下文大小（默认 128k tokens），在添加模型时填写；请按真实窗口填写，偏大会触发 API 超限
 - **大变更智能分诊**：暂存 diff 超出模型预算时，先让模型根据轻量清单（路径 / 增删行 / 体积）点名重点文件并展开 diff；若仍超预算再分批摘要并合并；其余文件仅保留路径语义
-- **生成设置**：切换提交信息语言（中文 / 英文），自定义 System Prompt，支持一键恢复默认
+- **生成设置**：切换提交信息语言（中文 / 英文），自定义 System Prompt，支持一键恢复默认；可开启「记录与 AI 的会话」并在「会话记录」中查看请求/响应
 - **更合理的默认提示**：变更少时正文简短；变更多时用总述 + Markdown 条目列表（`- 条目`）
 - **测试连接**：保存前验证 Base URL / API Key / 格式 / 模型
 - **安全存储**：API Key 存 VS Code SecretStorage；供应商配置存 `globalState`（不写 `settings.json`）
@@ -79,7 +79,7 @@ npx vsce package --no-dependencies
 通过 **Extensions: Install from VSIX...** 安装，或：
 
 ```bash
-code --install-extension git-commit-scribe-1.0.3.vsix
+code --install-extension git-commit-scribe-1.0.5.vsix
 ```
 
 ## 技术说明

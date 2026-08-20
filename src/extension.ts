@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
-import { ProviderStore } from './config/providerStore';
+import { generateId, ProviderStore } from './config/providerStore';
 import { GitService } from './git/gitService';
 import { generateCommitMessage } from './llm/client';
+import { SessionLogBuilder } from './llm/sessionLog';
 import { SettingsPanel } from './webview/settingsPanel';
 
 let store: ProviderStore;
@@ -51,6 +52,10 @@ async function generateCommand(): Promise<void> {
       cancellable: false,
     },
     async (progress) => {
+      const session = store.isDebugLlmLogEnabled()
+        ? new SessionLogBuilder(config.model, config.provider.name)
+        : null;
+
       try {
         progress.report({ message: '正在准备变更…' });
 
@@ -70,17 +75,38 @@ async function generateCommand(): Promise<void> {
         }
 
         // 4. 调用 LLM 生成(超预算时自动分批摘要再合并)
-        const message = await generateCommitMessage(changes, config, (phase) => {
-          progress.report({ message: phase });
-        });
+        const message = await generateCommitMessage(
+          changes,
+          config,
+          (phase) => {
+            progress.report({ message: phase });
+          },
+          session,
+        );
+
+        if (session) {
+          await store.appendLlmSession(session.finish(true, generateId()));
+          SettingsPanel.refreshIfOpen();
+        }
 
         // 5. 填入 SCM 输入框
         if (gitService.setCommitMessage(message)) {
-          vscode.window.setStatusBarMessage('$(check) Git Scribe: 提交信息已填入 Git 面板', 5000);
+          const tip = session
+            ? '$(check) Git Scribe: 提交信息已填入(会话已记录)'
+            : '$(check) Git Scribe: 提交信息已填入 Git 面板';
+          vscode.window.setStatusBarMessage(tip, 5000);
         } else {
           vscode.window.showErrorMessage('Git Scribe: 无法访问 Git 仓库输入框。');
         }
       } catch (error) {
+        if (session) {
+          try {
+            await store.appendLlmSession(session.finish(false, generateId()));
+            SettingsPanel.refreshIfOpen();
+          } catch {
+            // 日志写入失败不影响错误提示
+          }
+        }
         vscode.window.showErrorMessage(
           `Git Scribe 生成失败: ${error instanceof Error ? error.message : String(error)}`,
         );

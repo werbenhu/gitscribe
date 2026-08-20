@@ -4,3 +4,6 @@ dist/
 .vscode-test/
 .zcode/
 .DS_Store
+scripts/_*.html
+scripts/_*.js
+scripts/_*.mjs

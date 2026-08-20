@@ -8,6 +8,18 @@ export const STORAGE_KEYS = {
   commitLanguage: 'gitCommitScribe.commitLanguage',
   /** 自定义 system 提示词: Partial<Record<CommitLanguage, string>> */
   systemPrompts: 'gitCommitScribe.systemPrompts',
+  /** 是否记录与 AI 的会话(调试用) */
+  debugLlmLogEnabled: 'gitCommitScribe.debugLlmLogEnabled',
+  /** 最近若干次 LLM 会话记录 */
+  llmSessionLogs: 'gitCommitScribe.llmSessionLogs',
+} as const;
+
+/** 会话调试日志限制 */
+export const SESSION_LOG_LIMITS = {
+  /** 最多保留的会话条数 */
+  MAX_SESSIONS: 20,
+  /** 单条 message/response 最大字符,超出截断 */
+  MAX_CONTENT_CHARS: 200_000,
 } as const;
 
 /** SecretStorage API Key 键前缀(后接供应商 id) */

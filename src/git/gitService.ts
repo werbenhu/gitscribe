@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { BINARY_EXTENSIONS, DIFF_LIMITS, IGNORED_FILE_PATTERNS } from '../constants';
 import type {
@@ -89,32 +90,79 @@ export class GitService {
 
     const changes: GitChange[] = [];
     for (const item of items) {
-      const filePath = item.uri.path;
-      const diff = await this.getFileDiff(repository, filePath, item.status);
-      changes.push({ path: filePath, status: item.status, diff });
+      // Windows 上 uri.path 形如 /e:/foo,git API 认的是 fsPath 或相对仓库根路径
+      const displayPath = this.toRepoRelativePath(repository, item.uri.fsPath);
+      const diff = await this.getFileDiff(
+        repository,
+        item.uri.fsPath,
+        displayPath,
+        item.status,
+      );
+      changes.push({ path: displayPath, status: item.status, diff });
     }
     return changes;
+  }
+
+  /** 仓库相对路径(正斜杠),便于提示词阅读;失败则回退 fsPath */
+  private toRepoRelativePath(repository: Repository, fsPath: string): string {
+    const root = repository.rootUri?.fsPath;
+    if (!root) {
+      return fsPath.replace(/\\/g, '/');
+    }
+    const rel = path.relative(root, fsPath);
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
+      return fsPath.replace(/\\/g, '/');
+    }
+    return rel.replace(/\\/g, '/');
+  }
+
+  /** 供 git API 尝试的路径候选:相对路径优先,其次 fsPath */
+  private pathCandidates(repository: Repository, fsPath: string): string[] {
+    const rel = this.toRepoRelativePath(repository, fsPath);
+    const out: string[] = [];
+    if (rel && rel !== fsPath.replace(/\\/g, '/')) {
+      out.push(rel);
+      out.push(rel.replace(/\//g, path.sep));
+    }
+    out.push(fsPath);
+    // 去重保序
+    return [...new Set(out)];
   }
 
   /** 获取单个文件的 diff,带二进制/锁文件/超大文件过滤与截断 */
   private async getFileDiff(
     repository: Repository,
-    filePath: string,
+    fsPath: string,
+    displayPath: string,
     status: ChangeStatus,
   ): Promise<string> {
-    if (this.isBinary(filePath)) {
+    if (this.isBinary(fsPath) || this.isBinary(displayPath)) {
       return '[二进制文件,已跳过]';
     }
-    if (IGNORED_FILE_PATTERNS.some((p) => p.test(filePath))) {
+    if (
+      IGNORED_FILE_PATTERNS.some((p) => p.test(displayPath)) ||
+      IGNORED_FILE_PATTERNS.some((p) => p.test(fsPath.replace(/\\/g, '/')))
+    ) {
       return '[生成/锁文件,已跳过内容]';
     }
 
-    let diff: string;
-    try {
-      diff = await repository.diffIndexWithHEAD(filePath);
-    } catch {
-      // 无 HEAD(初次提交)等场景:用暂存区内容构造全 + diff
-      diff = await this.buildFallbackDiff(repository, filePath, status);
+    const candidates = this.pathCandidates(repository, fsPath);
+    let diff = '';
+    let lastError: unknown;
+
+    for (const candidate of candidates) {
+      try {
+        diff = await repository.diffIndexWithHEAD(candidate);
+        if (diff && diff.trim()) {
+          break;
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    if (!diff || !diff.trim()) {
+      diff = await this.buildFallbackDiff(repository, candidates, status, lastError);
     }
 
     if (diff.length > DIFF_LIMITS.MAX_FILE_CHARS) {
@@ -127,29 +175,68 @@ export class GitService {
     return diff;
   }
 
-  /** 回退 diff:新增文件全 +,删除文件全 -,其余标记状态 */
+  /** 回退 diff:新增文件全 +,删除文件全 -,其余尝试读暂存区内容 */
   private async buildFallbackDiff(
     repository: Repository,
-    filePath: string,
+    pathCandidates: string[],
     status: ChangeStatus,
+    previousError?: unknown,
   ): Promise<string> {
+    const tryShow = async (ref: string): Promise<string | null> => {
+      for (const candidate of pathCandidates) {
+        try {
+          return await repository.show(ref, candidate);
+        } catch {
+          // try next
+        }
+      }
+      return null;
+    };
+
     try {
       if (
         status === ChangeStatus.INDEX_ADDED ||
         status === ChangeStatus.UNTRACKED
       ) {
-        const content = await repository.show(':', filePath);
-        return this.toLines(content, '+');
+        const content = await tryShow(':');
+        if (content !== null) {
+          return this.toLines(content, '+');
+        }
+      } else if (
+        status === ChangeStatus.INDEX_DELETED ||
+        status === ChangeStatus.DELETED
+      ) {
+        const content = await tryShow('HEAD');
+        if (content !== null) {
+          return this.toLines(content, '-');
+        }
+      } else {
+        // 已修改:优先用暂存区全文作示意;再试工作区文件
+        const staged = await tryShow(':');
+        if (staged !== null) {
+          return `[暂存区文件内容(未能取得 unified diff)]\n${this.toLines(staged, '+')}`;
+        }
+        for (const candidate of pathCandidates) {
+          try {
+            const uri = path.isAbsolute(candidate)
+              ? vscode.Uri.file(candidate)
+              : vscode.Uri.file(path.join(repository.rootUri.fsPath, candidate));
+            const bytes = await vscode.workspace.fs.readFile(uri);
+            const text = Buffer.from(bytes).toString('utf8');
+            return `[工作区文件内容(未能取得 unified diff)]\n${this.toLines(text, '+')}`;
+          } catch {
+            // try next
+          }
+        }
       }
-      if (status === ChangeStatus.INDEX_DELETED || status === ChangeStatus.DELETED) {
-        const content = await repository.show('HEAD', filePath);
-        return this.toLines(content, '-');
-      }
-      const content = await repository.show(':', filePath);
-      return `[文件内容]\n${this.toLines(content, '+')}`;
     } catch {
-      return '[无法读取文件内容]';
+      // fall through
     }
+
+    const detail = previousError instanceof Error ? previousError.message : '';
+    return detail
+      ? `[无法读取文件内容: ${detail}]`
+      : '[无法读取文件内容]';
   }
 
   private toLines(content: string, prefix: string): string {

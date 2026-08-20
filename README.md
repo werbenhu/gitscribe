@@ -15,7 +15,7 @@ A VS Code extension that generates Git commit messages with configurable multi-p
   - Anthropic Messages (`/v1/messages`) — including Anthropic-compatible gateways
 - **Per-model context size**: each model has its own context window (default 128k tokens), set when adding the model — use the real window size to avoid API context errors
 - **Large-change triage**: when the staged diff exceeds the model budget, Git Scribe first asks the model which files matter (from a lightweight path/+/-/size manifest), digs into those diffs, and only then batches/summarizes if still too large — other files keep path-only context
-- **Generation settings**: choose commit language (Chinese / English) and customize the System Prompt, with one-click restore to defaults
+- **Generation settings**: choose commit language (Chinese / English) and customize the System Prompt, with one-click restore to defaults; optional “log AI sessions” for inspecting requests/responses in Settings
 - **Smarter default prompt**: small changes stay short; larger changes use a short summary plus Markdown bullet list (`- item`)
 - **Connection test**: verify Base URL / API Key / format / model before saving
 - **Secure storage**: API keys in VS Code SecretStorage; provider config in `globalState` (not `settings.json`)
@@ -79,7 +79,7 @@ npx vsce package --no-dependencies
 Install with **Extensions: Install from VSIX...**, or:
 
 ```bash
-code --install-extension git-commit-scribe-1.0.3.vsix
+code --install-extension git-commit-scribe-1.0.5.vsix
 ```
 
 ## Technical notes

@@ -1,7 +1,7 @@
 import { DIFF_LIMITS, maxDiffCharsFromContext } from '../constants';
 import type { CommitLanguage, GitChange } from '../types';
 import { changeHeader, estimateChangeChars } from './batch';
-import { formatChangeManifest } from './select';
+import { countDiffStats, formatChangeManifest } from './select';
 
 export interface ChatMessage {
   role: 'system' | 'user';
@@ -13,7 +13,14 @@ export function getDefaultSystemPrompt(language: CommitLanguage): string {
   if (language === 'en-US') {
     return [
       'You are a professional Git commit message generator.',
-      'Generate concise, professional, and standards-compliant commit messages based on the provided code changes.',
+      'Write the message ONLY from the provided diff. Ground every claim in that diff.',
+      '',
+      'Hard rules:',
+      '- Do NOT invent features, refactors, or behaviors that are not clearly shown in the diff',
+      '- Do NOT copy or paraphrase the examples below when they do not match the diff',
+      '- Do NOT write release-note style marketing copy for a tiny change',
+      '- Match message scale to change scale: few lines / 1–2 files → title only, or title + one short sentence; no bullet list',
+      '- Use bullets only when the diff clearly contains multiple independent aspects',
       '',
       'Requirements:',
       '- Strictly use Conventional Commits format',
@@ -32,44 +39,42 @@ export function getDefaultSystemPrompt(language: CommitLanguage): string {
       '  * ci: CI configuration files and scripts changes (Travis, Circle, GitHub Actions, etc.)',
       '  * chore: Other changes that do not modify src or test files (update dependencies, config files, etc.)',
       '  * revert: Revert a previous commit',
-      '- Example title: feat(auth): add user login functionality',
       '- Commit title should not exceed 72 characters, strongly recommended within 50 characters',
       '- Title should clearly describe "what was done" using imperative mood, no trailing period',
       '- Separate title and body with a blank line when a body is needed',
-      '- Body style depends on change size:',
-      '  * Small / single-purpose change: one short paragraph is enough (or title only if fully clear)',
-      '  * Large / multi-aspect change: one short intro sentence, then a Markdown bullet list',
-      '  * Each bullet MUST start with "- " (hyphen + space), which renders as a left bullet (·)',
-      '  * Prefer 2–6 bullets; each bullet starts with a verb and stays concise',
-      '  * Do NOT use numbered lists, asterisks, or bare lines without the "- " prefix',
-      '  * Do NOT turn a tiny change into a long bullet list',
+      '- When using a bullet body: each bullet MUST start with "- "; prefer 2–6 bullets; no numbered lists or asterisks',
       '- Body should explain "why" and "what", not a file list or path dump',
       '- Write the message in English',
       '- Return ONLY the commit message itself: no explanations, no quote wrapping, no markdown code fences',
-      '- Do NOT write any preamble, analysis, or notes before the message (e.g. "Because...", "Based on...", "Here is...")',
-      '- The first line MUST be the Conventional Commits subject, e.g. feat(ui): xxx',
+      '- Do NOT write any preamble before the message',
+      '- The first line MUST be the Conventional Commits subject',
       '- Do not use <think> tags or show thinking process',
-      '- Do not include any XML tags or special markers',
-      '- Focus on actual functional changes in the code, not file names or paths',
       '',
-      'Examples:',
+      'Examples (illustrative only — do not reuse unless the diff matches):',
       '',
       'Small change:',
       'fix(ui): correct empty-state label on settings page',
       '',
       'Large change:',
-      'feat(llm): improve multi-provider commit generation',
+      'feat(auth): add OAuth login and session refresh',
       '',
-      'Add provider switching and connection testing in settings.',
-      '- Support OpenAI Chat, OpenAI Responses, and Anthropic formats',
-      '- Stage all working-tree changes when the index is empty',
-      '- Strengthen default System Prompt and empty-response handling',
+      'Support signing in with external identity providers.',
+      '- Add OAuth callback handling and token exchange',
+      '- Persist refresh tokens securely',
+      '- Cover expired-session redirect in the web UI',
     ].join('\n');
   }
 
   return [
     '你是一个专业的 Git 提交信息生成助手。',
-    '请根据提供的代码变更内容，生成简洁、专业、符合规范的提交信息。',
+    '只能依据用户消息里提供的 diff 撰写提交信息，每条表述都必须能在 diff 中找到依据。',
+    '',
+    '硬性约束：',
+    '- 禁止臆造 diff 中未出现的功能、重构或行为',
+    '- 禁止套用下方示例的措辞/结构（示例仅供格式参考，与本次 diff 无关时绝不能照抄）',
+    '- 禁止把很小的改动写成发布说明式、宣传式长文',
+    '- 规模必须匹配：几行改动 / 1–2 个文件 → 只要标题，或标题 + 一句短正文；不要用条目列表',
+    '- 仅当 diff 明确包含多个彼此独立的方面时，才使用条目列表',
     '',
     '要求：',
     '- 严格使用约定式提交格式（Conventional Commits）',
@@ -88,38 +93,29 @@ export function getDefaultSystemPrompt(language: CommitLanguage): string {
     '  * ci: CI 配置文件和脚本的变更（Travis、Circle、GitHub Actions 等）',
     '  * chore: 其他不修改 src 或 test 文件的变更（更新依赖、配置文件等）',
     '  * revert: 回退之前的提交',
-    '- 示例标题：feat(auth): 添加用户登录功能',
     '- 提交标题不超过 72 个字符，强烈建议在 50 个字符以内',
     '- 标题应该清晰描述「做了什么」，使用祈使语气，结尾不加句号',
     '- 需要正文时，标题与正文之间空一行',
-    '- 正文风格按变更规模选择：',
-    '  * 变更少 / 单一目的：用一段简短正文即可（标题已说清时也可不要正文）',
-    '  * 变更多 / 涉及多个方面：先写一句总述，再用 Markdown 无序列表',
-    '  * 每条必须以「- 」（连字符 + 空格）开头，渲染后左侧会显示圆点（·）',
-    '  * 条目建议 2–6 条；每条以动词开头，简洁具体',
-    '  * 不要用数字编号、星号，也不要写成没有「- 」前缀的普通行',
-    '  * 不要把很小的改动硬拆成一长串条目',
+    '- 使用条目时：每条必须以「- 」开头；建议 2–6 条；不要用数字编号或星号',
     '- 正文说明「为什么」和「改了什么」，不要罗列文件名或路径',
     '- 使用简体中文输出',
     '- 只返回提交信息本身：不要额外解释、不要引号包裹、不要 markdown 代码块',
-    '- 不要在提交信息前写任何前言、分析或说明（例如「由于…」「基于…」「生成如下」等）',
-    '- 第一行必须是符合约定式提交格式的标题，例如 feat(ui): xxx',
+    '- 不要在提交信息前写任何前言、分析或说明',
+    '- 第一行必须是符合约定式提交格式的标题',
     '- 不要使用 <think> 标签或展示思考过程',
-    '- 不要包含任何 XML 标签或特殊标记',
-    '- 关注代码的实际功能变化，而不是文件名或路径',
     '',
-    '示例：',
+    '示例（仅说明格式，勿在不符时照抄）：',
     '',
     '小改动：',
     'fix(ui): 修正设置页空状态文案',
     '',
     '大改动：',
-    'feat(llm): 增强多供应商提交信息生成',
+    'feat(auth): 增加 OAuth 登录与会话刷新',
     '',
-    '完善供应商切换与连接测试，提升生成稳定性。',
-    '- 支持 OpenAI Chat、OpenAI Responses、Anthropic 三种格式',
-    '- 暂存区为空时自动暂存工作区全部改动',
-    '- 加强默认 System Prompt 与空响应处理',
+    '支持通过外部身份提供商登录。',
+    '- 增加 OAuth 回调处理与令牌交换',
+    '- 安全持久化刷新令牌',
+    '- 覆盖会话过期后的页面跳转',
   ].join('\n');
 }
 
@@ -164,6 +160,58 @@ function formatChangesBody(
   return parts.join('\n---\n');
 }
 
+function isUnreadStub(diff: string): boolean {
+  return (
+    diff.startsWith('[无法读取') ||
+    diff.startsWith('[Unable to read') ||
+    /^\[无法读取文件内容/.test(diff)
+  );
+}
+
+/** 根据文件数与增删行给模型明确的规模信号,抑制小改动写成长文 */
+function describeChangeScale(changes: GitChange[], language: CommitLanguage): string {
+  const zh = language !== 'en-US';
+  let additions = 0;
+  let deletions = 0;
+  let unread = 0;
+  for (const change of changes) {
+    if (isUnreadStub(change.diff)) {
+      unread += 1;
+      continue;
+    }
+    const stats = countDiffStats(change.diff);
+    additions += stats.additions;
+    deletions += stats.deletions;
+  }
+  const files = changes.length;
+  const touched = additions + deletions;
+  const small = files <= 2 && touched <= 40 && unread === 0;
+
+  if (zh) {
+    if (unread > 0 && touched === 0) {
+      return (
+        `变更规模: ${files} 个文件,其中 ${unread} 个未能读取 diff 正文。` +
+        `请仅依据路径与状态谨慎生成简短标题,不要臆造具体改动细节。`
+      );
+    }
+    const base = `变更规模: ${files} 个文件, +${additions}/-${deletions} 行。`;
+    return small
+      ? `${base}这是小改动:只写标题,或标题加一句短正文;禁止条目列表,禁止夸大或脑补未出现的功能。`
+      : `${base}请严格依据下方 diff 撰写,不要添加 diff 中没有的能力描述。`;
+  }
+
+  if (unread > 0 && touched === 0) {
+    return (
+      `Change scale: ${files} file(s), ${unread} with unreadable diffs. ` +
+      `Write a cautious short title from path/status only; do not invent change details.`
+    );
+  }
+  const base = `Change scale: ${files} file(s), +${additions}/-${deletions} lines.`;
+  return small
+    ? `${base} This is a small change: title only, or title plus one short sentence; no bullet list; do not invent features.`
+    : `${base} Write strictly from the diff below; do not add capabilities not shown there.`;
+}
+
 function buildUserPrompt(
   changes: GitChange[],
   language: CommitLanguage,
@@ -171,17 +219,18 @@ function buildUserPrompt(
   otherPaths?: string[],
 ): string {
   const zh = language !== 'en-US';
+  const scale = describeChangeScale(changes, language);
   const body = formatChangesBody(changes, language, maxTotalChars);
   let others = '';
   if (otherPaths && otherPaths.length > 0) {
     const list = otherPaths.map((p) => `- ${p}`).join('\n');
     others = zh
-      ? `\n\n以下文件未展开全文(体积或优先级原因),生成时请结合路径语义一并考虑:\n${list}`
-      : `\n\nThese files were not expanded in full (size/priority); consider their path semantics:\n${list}`;
+      ? `\n\n以下文件未展开全文(体积或优先级原因),生成时请结合路径语义一并考虑,但不要臆造其具体改动:\n${list}`
+      : `\n\nThese files were not expanded in full (size/priority); consider path semantics only, and do not invent their concrete changes:\n${list}`;
   }
   return zh
-    ? `请为以下代码变更生成提交信息:\n\n${body}${others}\n\n请直接返回提交信息,不需要额外解释。`
-    : `Generate a commit message for the following changes:\n\n${body}${others}\n\nReturn the commit message directly without any explanation.`;
+    ? `${scale}\n\n请为以下代码变更生成提交信息:\n\n${body}${others}\n\n请直接返回提交信息,不需要额外解释。`
+    : `${scale}\n\nGenerate a commit message for the following changes:\n\n${body}${others}\n\nReturn the commit message directly without any explanation.`;
 }
 
 /**
@@ -306,8 +355,8 @@ export function buildMergePrompt(
   }
 
   const user = zh
-    ? `以下是多批代码变更的摘要。请综合它们,生成一条符合约定式提交的完整提交信息。\n\n${blocks}${omittedSection}\n\n请直接返回提交信息,不需要额外解释。`
-    : `Below are summaries of multiple batches of code changes. Synthesize them into one Conventional Commits message.\n\n${blocks}${omittedSection}\n\nReturn the commit message directly without any explanation.`;
+    ? `以下是多批代码变更的摘要。请综合它们,生成一条符合约定式提交的完整提交信息。\n只使用摘要中确实出现的信息,不要脑补或夸大。\n\n${blocks}${omittedSection}\n\n请直接返回提交信息,不需要额外解释。`
+    : `Below are summaries of multiple batches of code changes. Synthesize them into one Conventional Commits message.\nUse only facts present in the summaries; do not invent or exaggerate.\n\n${blocks}${omittedSection}\n\nReturn the commit message directly without any explanation.`;
 
   return [
     { role: 'system', content: resolveSystemPrompt(language, customSystemPrompt) },

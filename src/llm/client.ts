@@ -19,6 +19,7 @@ import {
   partitionByFocus,
   resolveFocusChanges,
 } from './select';
+import type { SessionLogBuilder } from './sessionLog';
 
 export { LLMError };
 
@@ -42,6 +43,18 @@ async function callProvider(
   }
 }
 
+async function callTracked(
+  config: ResolvedConfig,
+  messages: ChatMessage[],
+  phase: string,
+  session?: SessionLogBuilder | null,
+): Promise<string> {
+  if (!session) {
+    return callProvider(config, messages);
+  }
+  return session.run(phase, messages, () => callProvider(config, messages));
+}
+
 export type ProgressReporter = (phase: string) => void;
 
 /**
@@ -49,28 +62,30 @@ export type ProgressReporter = (phase: string) => void;
  * - 体积在预算内:单次生成
  * - 超预算:先让模型根据轻量清单点名 → 只深挖 focus 文件 →
  *   仍超预算则对 focus 分批摘要再合并;未点名文件仅保留路径语义
+ * - session 非空时记录每一回合请求/响应(调试用)
  */
 export async function generateCommitMessage(
   changes: GitChange[],
   config: ResolvedConfig,
   onProgress?: ProgressReporter,
+  session?: SessionLogBuilder | null,
 ): Promise<string> {
   const budget = maxDiffCharsFromContext(config.contextSize);
   const total = estimateTotalChars(changes, config.language);
 
   if (total <= budget) {
-    return generateOnce(changes, config, onProgress);
+    return generateOnce(changes, config, onProgress, undefined, session);
   }
 
-  const focused = await selectFocusFiles(changes, config, budget, onProgress);
+  const focused = await selectFocusFiles(changes, config, budget, onProgress, session);
   const { others } = partitionByFocus(changes, focused);
   const otherPaths = others.map((c) => c.path);
 
   if (estimateTotalChars(focused, config.language) <= budget) {
-    return generateOnce(focused, config, onProgress, otherPaths);
+    return generateOnce(focused, config, onProgress, otherPaths, session);
   }
 
-  return generateViaBatches(focused, config, budget, onProgress, otherPaths);
+  return generateViaBatches(focused, config, budget, onProgress, otherPaths, session);
 }
 
 /** 轻量清单 → 模型点名;失败则本地贪心回退 */
@@ -79,6 +94,7 @@ async function selectFocusFiles(
   config: ResolvedConfig,
   budget: number,
   onProgress?: ProgressReporter,
+  session?: SessionLogBuilder | null,
 ): Promise<GitChange[]> {
   onProgress?.(
     config.language === 'en-US'
@@ -93,11 +109,10 @@ async function selectFocusFiles(
       budget,
       DIFF_LIMITS.MAX_FOCUS_FILES,
     );
-    const raw = await callProvider(config, messages);
+    const raw = await callTracked(config, messages, 'select', session);
     const paths = parseFocusPaths(raw);
     const resolved = resolveFocusChanges(changes, paths);
     if (resolved.length > 0) {
-      // 数量上限由提示词约束;超字符预算交给后续分批,不在此丢弃 AI 点名
       return resolved.slice(0, DIFF_LIMITS.MAX_FOCUS_FILES);
     }
   } catch {
@@ -119,11 +134,12 @@ async function generateViaBatches(
   budget: number,
   onProgress?: ProgressReporter,
   otherPaths: string[] = [],
+  session?: SessionLogBuilder | null,
 ): Promise<string> {
   const { batches, omitted } = packBatches(focused, config.language, budget);
 
   if (batches.length === 1 && omitted.length === 0) {
-    return generateOnce(batches[0], config, onProgress, otherPaths);
+    return generateOnce(batches[0], config, onProgress, otherPaths, session);
   }
 
   if (batches.length === 0) {
@@ -150,7 +166,12 @@ async function generateViaBatches(
       batchCount,
       config.contextSize,
     );
-    const summary = (await callProvider(config, messages)).trim();
+    const summary = (await callTracked(
+      config,
+      messages,
+      `summarize:${i + 1}/${batchCount}`,
+      session,
+    )).trim();
     if (!summary) {
       throw new LLMError(
         config.language === 'en-US'
@@ -175,7 +196,7 @@ async function generateViaBatches(
     config.systemPrompt,
     omittedPaths,
   );
-  const raw = await callProvider(config, mergeMessages);
+  const raw = await callTracked(config, mergeMessages, 'merge', session);
   return finalizeMessage(raw);
 }
 
@@ -184,6 +205,7 @@ async function generateOnce(
   config: ResolvedConfig,
   onProgress?: ProgressReporter,
   otherPaths?: string[],
+  session?: SessionLogBuilder | null,
 ): Promise<string> {
   onProgress?.(config.language === 'en-US' ? 'Generating…' : '正在生成…');
   const messages = buildPrompt(
@@ -193,7 +215,7 @@ async function generateOnce(
     config.contextSize,
     otherPaths,
   );
-  const raw = await callProvider(config, messages);
+  const raw = await callTracked(config, messages, 'generate', session);
   return finalizeMessage(raw);
 }
 

@@ -49,6 +49,26 @@ export interface ProviderView extends Provider {
   isActive: boolean;
 }
 
+/** 一次 LLM 往返(请求 + 响应) */
+export interface LlmTurnLog {
+  /** 阶段标签,如 generate / select / summarize:1/3 / merge */
+  phase: string;
+  messages: { role: string; content: string }[];
+  response: string;
+  error?: string;
+  durationMs: number;
+}
+
+/** 一次「生成提交信息」完整会话(可含多回合) */
+export interface LlmSessionLog {
+  id: string;
+  startedAt: number;
+  model: string;
+  providerName: string;
+  ok: boolean;
+  turns: LlmTurnLog[];
+}
+
 /** webview 状态快照 */
 export interface WebviewState {
   providers: ProviderView[];
@@ -63,6 +83,10 @@ export interface WebviewState {
   defaultSystemPrompts: Record<CommitLanguage, string>;
   /** 新增模型时的默认上下文大小 */
   defaultContextSize: number;
+  /** 是否记录与 AI 的会话 */
+  debugLlmLogEnabled: boolean;
+  /** 最近会话记录(新→旧) */
+  llmSessions: LlmSessionLog[];
 }
 
 /** 一次生成请求所需的完整解析后配置 */
@@ -121,6 +145,8 @@ export interface RepositoryState {
 export interface Repository {
   readonly state: RepositoryState;
   readonly inputBox: GitInputBox;
+  /** 仓库根目录 */
+  readonly rootUri: { path: string; fsPath: string; scheme: string };
   /** 将路径加入暂存区 */
   add(paths: string[]): Promise<void>;
   /** index(暂存区)与 HEAD 的变更列表 */

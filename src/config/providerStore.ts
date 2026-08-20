@@ -3,12 +3,14 @@ import {
   CONTEXT_DEFAULTS,
   normalizeContextSize,
   SECRET_KEY_PREFIX,
+  SESSION_LOG_LIMITS,
   STORAGE_KEYS,
 } from '../constants';
 import { getDefaultSystemPrompt } from '../llm/prompt';
 import type {
   AppState,
   CommitLanguage,
+  LlmSessionLog,
   ModelConfig,
   Provider,
   ProviderView,
@@ -74,6 +76,27 @@ export class ProviderStore {
       delete map[language];
     }
     await this.context.globalState.update(STORAGE_KEYS.systemPrompts, map);
+  }
+
+  isDebugLlmLogEnabled(): boolean {
+    return this.context.globalState.get<boolean>(STORAGE_KEYS.debugLlmLogEnabled, false);
+  }
+
+  async setDebugLlmLogEnabled(enabled: boolean): Promise<void> {
+    await this.context.globalState.update(STORAGE_KEYS.debugLlmLogEnabled, enabled);
+  }
+
+  getLlmSessions(): LlmSessionLog[] {
+    return this.context.globalState.get<LlmSessionLog[]>(STORAGE_KEYS.llmSessionLogs, []);
+  }
+
+  async appendLlmSession(session: LlmSessionLog): Promise<void> {
+    const next = [session, ...this.getLlmSessions()].slice(0, SESSION_LOG_LIMITS.MAX_SESSIONS);
+    await this.context.globalState.update(STORAGE_KEYS.llmSessionLogs, next);
+  }
+
+  async clearLlmSessions(): Promise<void> {
+    await this.context.globalState.update(STORAGE_KEYS.llmSessionLogs, []);
   }
 
   async getApiKey(providerId: string): Promise<string | undefined> {
@@ -248,6 +271,8 @@ export class ProviderStore {
       systemPromptCustomized,
       defaultSystemPrompts,
       defaultContextSize: CONTEXT_DEFAULTS.CONTEXT_SIZE,
+      debugLlmLogEnabled: this.isDebugLlmLogEnabled(),
+      llmSessions: this.getLlmSessions(),
     };
   }
 

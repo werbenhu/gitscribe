@@ -35,6 +35,12 @@ export function getSettingsHtml(nonce: string): string {
     display: flex;
     flex-direction: column;
     padding: 12px 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .sidebar-top { flex: 0 0 auto; }
+  .nav-item, #addProviderBtn, .sidebar-section-title, .provider-item {
+    flex-shrink: 0;
   }
   .sidebar-section-title {
     padding: 4px 16px 8px;
@@ -81,6 +87,7 @@ export function getSettingsHtml(nonce: string): string {
   #addProviderBtn:hover { background: var(--vscode-button-secondaryHoverBackground, #45494e); }
   #sidebarFooter {
     margin-top: auto;
+    flex-shrink: 0;
     padding: 12px 16px 8px;
     border-top: 1px solid var(--vscode-panel-border, #3c3c3c);
     font-size: 12px;
@@ -112,6 +119,70 @@ export function getSettingsHtml(nonce: string): string {
   }
   .nav-item:hover { background: var(--vscode-list-hoverBackground); }
   .nav-item.selected { background: var(--vscode-list-activeSelectionBackground); color: var(--vscode-list-activeSelectionForeground); }
+  .toggle-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    max-width: 560px;
+  }
+  .toggle-row input[type=checkbox] { margin-top: 3px; }
+  .toggle-row .toggle-text { flex: 1; }
+  .toggle-row .toggle-title { font-size: 13px; margin-bottom: 4px; }
+  .toggle-row .toggle-hint { font-size: 11px; color: var(--vscode-descriptionForeground); line-height: 1.45; }
+  .session-item {
+    width: 100%;
+    text-align: left;
+    border: 1px solid var(--vscode-input-border, #3c3c3c);
+    border-radius: 4px;
+    background: var(--vscode-input-background);
+    color: var(--vscode-foreground);
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+  }
+  .session-item:hover { border-color: var(--vscode-focusBorder); }
+  .session-item.selected { outline: 1px solid var(--vscode-focusBorder); }
+  .session-item .session-title { font-size: 13px; margin-bottom: 4px; }
+  .session-item .session-meta { font-size: 11px; color: var(--vscode-descriptionForeground); }
+  .session-badge {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 6px;
+  }
+  .session-badge.ok { background: rgba(76, 175, 80, 0.25); color: #81c784; }
+  .session-badge.fail { background: rgba(244, 135, 113, 0.25); color: #f48771; }
+  .turn-block {
+    border: 1px solid var(--vscode-panel-border, #3c3c3c);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .turn-head {
+    padding: 8px 10px;
+    font-size: 12px;
+    background: var(--vscode-editorWidget-background, rgba(127,127,127,0.08));
+  }
+  .msg-label {
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    margin: 8px 10px 4px;
+  }
+  .msg-pre {
+    margin: 0 10px 10px;
+    padding: 8px;
+    max-height: 280px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: var(--vscode-editor-font-family, monospace);
+    font-size: 11px;
+    line-height: 1.45;
+    background: var(--vscode-textCodeBlock-background, rgba(127,127,127,0.12));
+    border-radius: 3px;
+  }
+  #sessionDetailEmpty { color: var(--vscode-descriptionForeground); font-size: 12px; margin-top: 8px; }
   #main { flex: 1; overflow-y: auto; padding: 20px 28px; }
   h2 { margin: 0 0 4px; font-size: 16px; }
   .desc { color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 18px; }
@@ -230,11 +301,14 @@ export function getSettingsHtml(nonce: string): string {
 </head>
 <body>
   <div id="sidebar">
-    <div class="sidebar-section-title">自定义供应商</div>
-    <div id="providerList"></div>
-    <button id="addProviderBtn">＋ 添加供应商</button>
-    <div class="sidebar-section-title" style="margin-top:8px">通用设置</div>
-    <button class="nav-item" id="promptNavBtn" type="button">生成设置</button>
+    <div class="sidebar-top">
+      <div class="sidebar-section-title">自定义供应商</div>
+      <div id="providerList"></div>
+      <button type="button" id="addProviderBtn">＋ 添加供应商</button>
+      <div class="sidebar-section-title" style="margin-top:8px">通用设置</div>
+      <button class="nav-item" id="promptNavBtn" type="button">生成设置</button>
+      <button class="nav-item" id="sessionsNavBtn" type="button">会话记录</button>
+    </div>
     <div id="sidebarFooter">
       <div class="row">
         <label>当前供应商</label>
@@ -319,11 +393,34 @@ export function getSettingsHtml(nonce: string): string {
         <div id="promptStatusLabel">使用内置默认</div>
       </div>
 
+      <div class="field">
+        <label>调试</label>
+        <div class="toggle-row">
+          <input type="checkbox" id="debugLlmLogToggle">
+          <div class="toggle-text">
+            <div class="toggle-title">记录与 AI 的会话</div>
+            <div class="toggle-hint">开启后，每次生成会保存请求/响应，可在左侧「会话记录」查看。记录可能包含代码 diff，请勿在共享环境长期开启。</div>
+          </div>
+        </div>
+      </div>
+
       <div class="btn-row">
         <button class="primary" id="savePromptBtn">保存</button>
         <button class="secondary" id="resetPromptBtn">恢复默认</button>
       </div>
       <div id="promptMessage"></div>
+    </div>
+
+    <div id="sessionsView" class="hidden">
+      <h2>会话记录</h2>
+      <div class="desc">查看最近生成过程中与模型的对话内容，便于排查提示词与输出问题。最多保留 20 条。</div>
+      <div class="btn-row">
+        <button type="button" class="secondary" id="clearSessionsBtn">清空记录</button>
+        <button type="button" class="secondary" id="copySessionBtn" disabled>复制当前会话</button>
+      </div>
+      <div id="sessionList"></div>
+      <div id="sessionDetailEmpty">选择一条会话查看详情。</div>
+      <div id="sessionDetail" class="hidden"></div>
     </div>
   </div>
 
@@ -350,10 +447,12 @@ var state = {
   systemPrompts: {},
   systemPromptCustomized: {},
   defaultSystemPrompts: {},
-  defaultContextSize: DEFAULT_CONTEXT_SIZE
+  defaultContextSize: DEFAULT_CONTEXT_SIZE,
+  debugLlmLogEnabled: false,
+  llmSessions: []
 };
 // form.models: [{ id, contextSize }]
-var mode = 'empty'; // 'add' | 'edit' | 'empty' | 'prompt'
+var mode = 'empty'; // 'add' | 'edit' | 'empty' | 'prompt' | 'sessions'
 var form = null;
 var testing = false;
 var promptLanguage = 'zh-CN';
@@ -361,10 +460,25 @@ var promptDirty = false;
 var syncingActiveSelects = false;
 var confirmOnOk = null;
 var confirmOnCancel = null;
+var selectedSessionId = null;
 
 function el(id) { return document.getElementById(id); }
+function setHidden(id, hidden) {
+  var node = el(id);
+  if (!node) { return; }
+  node.classList.toggle('hidden', !!hidden);
+}
+function setSelected(id, selected) {
+  var node = el(id);
+  if (!node) { return; }
+  node.classList.toggle('selected', !!selected);
+}
 function esc(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(new RegExp('<', 'g'), '&lt;')
+    .replace(new RegExp('>', 'g'), '&gt;')
+    .replace(/"/g, '&quot;');
 }
 function modelIdOf(m) { return typeof m === 'string' ? m : (m && m.id ? m.id : ''); }
 function modelContextOf(m) {
@@ -409,10 +523,12 @@ function showPromptMessage(text, ok) {
   if (!text) { m.className = ''; }
 }
 function showMainView(view) {
-  el('empty').classList.toggle('hidden', view !== 'empty');
-  el('form').classList.toggle('hidden', view !== 'form');
-  el('promptView').classList.toggle('hidden', view !== 'prompt');
-  el('promptNavBtn').classList.toggle('selected', view === 'prompt');
+  setHidden('empty', view !== 'empty');
+  setHidden('form', view !== 'form');
+  setHidden('promptView', view !== 'prompt');
+  setHidden('sessionsView', view !== 'sessions');
+  setSelected('promptNavBtn', view === 'prompt');
+  setSelected('sessionsNavBtn', view === 'sessions');
 }
 
 function resolveConfirm(ok) {
@@ -445,7 +561,8 @@ function renderSidebar() {
   var html = '';
   state.providers.forEach(function (p) {
     var usable = p.hasApiKey && p.models && p.models.length > 0;
-    html += '<button class="provider-item' + (mode !== 'prompt' && form && form.id === p.id ? ' selected' : '') + '" data-id="' + esc(p.id) + '">'
+    var selected = (mode !== 'prompt' && mode !== 'sessions' && form && form.id === p.id);
+    html += '<button type="button" class="provider-item' + (selected ? ' selected' : '') + '" data-id="' + esc(p.id) + '">'
       + '<span class="dot ' + (usable ? 'ok' : 'missing') + '"></span>'
       + '<span class="name">' + esc(p.name) + '</span>'
       + (p.isActive ? '<span class="badge-active">当前</span>' : '')
@@ -456,7 +573,8 @@ function renderSidebar() {
     child.addEventListener('click', function () { selectProvider(child.getAttribute('data-id')); });
   });
   renderActiveSelects();
-  el('promptNavBtn').classList.toggle('selected', mode === 'prompt');
+  setSelected('promptNavBtn', mode === 'prompt');
+  setSelected('sessionsNavBtn', mode === 'sessions');
 }
 
 function renderActiveSelects() {
@@ -546,8 +664,134 @@ function renderPromptView(forceText) {
     el('systemPromptInput').value = text;
     promptDirty = false;
   }
+  var debugToggle = el('debugLlmLogToggle');
+  if (debugToggle) {
+    debugToggle.checked = !!state.debugLlmLogEnabled;
+  }
   updatePromptStatus();
   renderSidebar();
+}
+
+function formatSessionTime(ts) {
+  try {
+    return new Date(ts).toLocaleString();
+  } catch (e) {
+    return String(ts);
+  }
+}
+
+function findSelectedSession() {
+  var list = state.llmSessions || [];
+  for (var i = 0; i < list.length; i++) {
+    if (list[i].id === selectedSessionId) { return list[i]; }
+  }
+  return null;
+}
+
+function renderSessionDetail(session) {
+  var detail = el('sessionDetail');
+  var empty = el('sessionDetailEmpty');
+  if (!session) {
+    detail.classList.add('hidden');
+    detail.innerHTML = '';
+    empty.classList.remove('hidden');
+    el('copySessionBtn').disabled = true;
+    return;
+  }
+  empty.classList.add('hidden');
+  detail.classList.remove('hidden');
+  el('copySessionBtn').disabled = false;
+
+  var html = '';
+  (session.turns || []).forEach(function (turn, idx) {
+    html += '<div class="turn-block">';
+    html += '<div class="turn-head">#' + (idx + 1) + ' · ' + esc(turn.phase || '')
+      + ' · ' + esc(String(turn.durationMs || 0)) + 'ms'
+      + (turn.error ? ' · <span style="color:#f48771">ERROR</span>' : '')
+      + '</div>';
+    (turn.messages || []).forEach(function (m) {
+      html += '<div class="msg-label">' + esc(String(m.role || '').toUpperCase()) + '</div>';
+      html += '<pre class="msg-pre">' + esc(m.content || '') + '</pre>';
+    });
+    if (turn.error) {
+      html += '<div class="msg-label">ERROR</div>';
+      html += '<pre class="msg-pre">' + esc(turn.error) + '</pre>';
+    }
+    html += '<div class="msg-label">ASSISTANT</div>';
+    html += '<pre class="msg-pre">' + esc(turn.response || '(empty)') + '</pre>';
+    html += '</div>';
+  });
+  if (!(session.turns && session.turns.length)) {
+    html = '<div class="desc">该会话没有记录到任何回合（可能在调用模型前就失败了）。</div>';
+  }
+  detail.innerHTML = html;
+}
+
+function renderSessionsView() {
+  showMainView('sessions');
+  var listEl = el('sessionList');
+  var sessions = state.llmSessions || [];
+  if (selectedSessionId && !sessions.some(function (s) { return s.id === selectedSessionId; })) {
+    selectedSessionId = null;
+  }
+  if (!selectedSessionId && sessions.length > 0) {
+    selectedSessionId = sessions[0].id;
+  }
+
+  if (sessions.length === 0) {
+    var hint = state.debugLlmLogEnabled
+      ? '暂无记录。开关已开启，请再生成一次提交信息；若设置页一直开着，生成后点一下左侧「会话记录」即可刷新。'
+      : '暂无记录。请先打开「生成设置」，勾选「记录与 AI 的会话」，然后再生成一次提交信息（默认关闭，不会自动记录）。';
+    listEl.innerHTML = '<div class="desc">' + esc(hint) + '</div>';
+    renderSessionDetail(null);
+  } else {
+    var html = '';
+    sessions.forEach(function (s) {
+      html += '<button type="button" class="session-item' + (s.id === selectedSessionId ? ' selected' : '') + '" data-id="' + esc(s.id) + '">'
+        + '<div class="session-title">' + esc(formatSessionTime(s.startedAt))
+        + '<span class="session-badge ' + (s.ok ? 'ok' : 'fail') + '">' + (s.ok ? '成功' : '失败') + '</span></div>'
+        + '<div class="session-meta">' + esc(s.providerName || '') + ' / ' + esc(s.model || '')
+        + ' · ' + esc(String((s.turns && s.turns.length) || 0)) + ' 回合</div>'
+        + '</button>';
+    });
+    listEl.innerHTML = html;
+    Array.prototype.forEach.call(listEl.querySelectorAll('.session-item'), function (btn) {
+      btn.addEventListener('click', function () {
+        selectedSessionId = btn.getAttribute('data-id');
+        renderSessionsView();
+      });
+    });
+    renderSessionDetail(findSelectedSession());
+  }
+  renderSidebar();
+}
+
+function sessionToPlainText(session) {
+  if (!session) { return ''; }
+  var lines = [];
+  lines.push('time: ' + formatSessionTime(session.startedAt));
+  lines.push('provider: ' + (session.providerName || ''));
+  lines.push('model: ' + (session.model || ''));
+  lines.push('ok: ' + String(session.ok));
+  lines.push('');
+  (session.turns || []).forEach(function (turn, idx) {
+    lines.push('===== turn #' + (idx + 1) + ' [' + (turn.phase || '') + '] ' + (turn.durationMs || 0) + 'ms =====');
+    (turn.messages || []).forEach(function (m) {
+      lines.push('--- ' + String(m.role || '').toUpperCase() + ' ---');
+      lines.push(m.content || '');
+      lines.push('');
+    });
+    if (turn.error) {
+      lines.push('--- ERROR ---');
+      lines.push(turn.error);
+      lines.push('');
+    }
+    lines.push('--- ASSISTANT ---');
+    lines.push(turn.response || '(empty)');
+    lines.push('');
+  });
+  // 注意:本文件 HTML/JS 包在外层模板字符串中,换行必须写成 \\n,否则会变成真实换行导致脚本语法错误
+  return lines.join('\\n');
 }
 
 function renderModels() {
@@ -595,6 +839,13 @@ function openPromptView() {
   renderPromptView(true);
 }
 
+function openSessionsView() {
+  mode = 'sessions';
+  form = null;
+  promptDirty = false;
+  renderSessionsView();
+}
+
 function readFormInputs() {
   form.name = el('nameInput').value.trim();
   form.baseUrl = el('baseUrlInput').value.trim();
@@ -616,19 +867,67 @@ function parseContextInput(raw) {
   return n;
 }
 
+function onClick(id, handler) {
+  var node = el(id);
+  if (!node) { return; }
+  node.addEventListener('click', function (ev) {
+    try {
+      handler(ev);
+    } catch (err) {
+      var msg = err && err.message ? err.message : String(err);
+      if (el('message')) {
+        showMessage('界面错误: ' + msg, false);
+        setHidden('empty', true);
+        setHidden('form', false);
+      }
+    }
+  });
+}
+
 function bindEvents() {
-  el('addProviderBtn').addEventListener('click', function () {
+  onClick('addProviderBtn', function () {
     mode = 'add';
     form = { id: null, name: '', baseUrl: '', apiFormat: 'openai-chat', models: [] };
     promptDirty = false;
     renderForm();
   });
 
-  el('promptNavBtn').addEventListener('click', function () {
+  onClick('promptNavBtn', function () {
     openPromptView();
   });
 
-  el('addModelBtn').addEventListener('click', function () {
+  onClick('sessionsNavBtn', function () {
+    openSessionsView();
+  });
+
+  var debugToggle = el('debugLlmLogToggle');
+  if (debugToggle) {
+    debugToggle.addEventListener('change', function () {
+      vscode.postMessage({ type: 'setDebugLlmLog', enabled: !!debugToggle.checked });
+    });
+  }
+
+  onClick('clearSessionsBtn', function () {
+    askConfirm('确定清空全部会话记录？', function () {
+      selectedSessionId = null;
+      vscode.postMessage({ type: 'clearLlmSessions' });
+    }, { danger: true, okText: '清空' });
+  });
+
+  onClick('copySessionBtn', function () {
+    var session = findSelectedSession();
+    var text = sessionToPlainText(session);
+    if (!text) { return; }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () {
+        // no-op
+      }, function () {
+        // ignore
+      });
+    }
+  });
+
+  onClick('addModelBtn', function () {
     var value = el('modelInput').value.trim();
     if (!value) { showMessage('请输入模型 id', false); return; }
     if (findModelIndex(value) >= 0) { showMessage('模型已存在: ' + value, false); return; }
@@ -794,6 +1093,8 @@ window.addEventListener('message', function (event) {
     } else if (mode === 'prompt') {
       promptDirty = false;
       renderPromptView(true);
+    } else if (mode === 'sessions') {
+      renderSessionsView();
     } else if (mode === 'empty') {
       showMainView('empty');
     }
