@@ -1,4 +1,4 @@
-import { API_CONSTANTS } from '../constants';
+import { API_CONSTANTS, isDeepSeekModel } from '../constants';
 import { LLMError, postJson } from './http';
 import type { ChatMessage } from './prompt';
 
@@ -35,6 +35,19 @@ export async function callAnthropic(
     .filter((m) => m.role !== 'system')
     .map((m) => ({ role: m.role, content: m.content }));
 
+  // DeepSeek Anthropic 兼容口默认开 thinking,易占满 max_tokens;提交生成关闭思考
+  const body: Record<string, unknown> = {
+    model,
+    max_tokens: API_CONSTANTS.MAX_TOKENS,
+    temperature: API_CONSTANTS.TEMPERATURE,
+    system,
+    messages: chatMessages,
+  };
+  if (isDeepSeekModel(model)) {
+    // DeepSeek Anthropic 文档: reasoning.effort=none 关闭 thinking
+    body.reasoning = { effort: 'none' };
+  }
+
   const data = await postJson<AnthropicMessagesResponse>(
     url,
     {
@@ -43,13 +56,7 @@ export async function callAnthropic(
       // 部分兼容网关同时认 Bearer
       Authorization: `Bearer ${apiKey}`,
     },
-    {
-      model,
-      max_tokens: API_CONSTANTS.MAX_TOKENS,
-      temperature: API_CONSTANTS.TEMPERATURE,
-      system,
-      messages: chatMessages,
-    },
+    body,
   );
 
   const text = extractAnthropicText(data);

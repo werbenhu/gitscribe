@@ -47,11 +47,13 @@ async function generateCommand(): Promise<void> {
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.SourceControl,
-      title: 'Git Scribe: 正在生成提交信息…',
+      title: 'Git Scribe',
       cancellable: false,
     },
-    async () => {
+    async (progress) => {
       try {
+        progress.report({ message: '正在准备变更…' });
+
         // 3. 获取暂存区变更;为空则先暂存工作区全部改动
         let changes = await gitService.getStagedChanges();
         if (changes.length === 0) {
@@ -67,8 +69,10 @@ async function generateCommand(): Promise<void> {
           }
         }
 
-        // 4. 调用 LLM 生成
-        const message = await generateCommitMessage(changes, config);
+        // 4. 调用 LLM 生成(超预算时自动分批摘要再合并)
+        const message = await generateCommitMessage(changes, config, (phase) => {
+          progress.report({ message: phase });
+        });
 
         // 5. 填入 SCM 输入框
         if (gitService.setCommitMessage(message)) {

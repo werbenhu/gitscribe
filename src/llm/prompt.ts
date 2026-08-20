@@ -1,5 +1,7 @@
 import { DIFF_LIMITS, maxDiffCharsFromContext } from '../constants';
 import type { CommitLanguage, GitChange } from '../types';
+import { changeHeader, estimateChangeChars } from './batch';
+import { formatChangeManifest } from './select';
 
 export interface ChatMessage {
   role: 'system' | 'user';
@@ -129,25 +131,8 @@ function resolveSystemPrompt(
   return custom || getDefaultSystemPrompt(language);
 }
 
-function statusText(status: number, language: CommitLanguage): string {
-  const zh = language !== 'en-US';
-  switch (status) {
-    case 0:
-      return zh ? '新增' : 'added';
-    case 1:
-    case 5:
-      return zh ? '修改' : 'modified';
-    case 2:
-    case 6:
-      return zh ? '删除' : 'deleted';
-    case 3:
-      return zh ? '重命名' : 'renamed';
-    default:
-      return zh ? '变更' : 'changed';
-  }
-}
-
-function buildUserPrompt(
+/** 把变更列表拼成带预算的正文(计入 header / 分隔符) */
+function formatChangesBody(
   changes: GitChange[],
   language: CommitLanguage,
   maxTotalChars?: number,
@@ -159,43 +144,196 @@ function buildUserPrompt(
   const parts: string[] = [];
 
   for (const change of changes) {
-    const header = zh
-      ? `文件: ${change.path}\n状态: ${statusText(change.status, language)}`
-      : `File: ${change.path}\nStatus: ${statusText(change.status, language)}`;
+    const header = changeHeader(change, language);
+    const overhead = estimateChangeChars(change, language, '');
     let diff = change.diff;
-    if (diff.length > budget) {
-      diff = diff.slice(0, Math.max(0, budget)) + (zh ? '\n... (diff 超出预算已截断)' : '\n... (diff truncated)');
+    const roomForDiff = Math.max(0, budget - overhead);
+    if (diff.length > roomForDiff) {
+      const marker = zh ? '\n... (diff 超出预算已截断)' : '\n... (diff truncated)';
+      const keep = Math.max(0, roomForDiff - marker.length);
+      diff = diff.slice(0, keep) + marker;
     }
-    budget -= diff.length;
-    parts.push(`${header}\n\n${diff}`);
+    const block = `${header}\n\n${diff}`;
+    budget -= estimateChangeChars(change, language, diff);
+    parts.push(block);
     if (budget <= 0) {
       break;
     }
   }
 
-  const body = parts.join('\n---\n');
+  return parts.join('\n---\n');
+}
+
+function buildUserPrompt(
+  changes: GitChange[],
+  language: CommitLanguage,
+  maxTotalChars?: number,
+  otherPaths?: string[],
+): string {
+  const zh = language !== 'en-US';
+  const body = formatChangesBody(changes, language, maxTotalChars);
+  let others = '';
+  if (otherPaths && otherPaths.length > 0) {
+    const list = otherPaths.map((p) => `- ${p}`).join('\n');
+    others = zh
+      ? `\n\n以下文件未展开全文(体积或优先级原因),生成时请结合路径语义一并考虑:\n${list}`
+      : `\n\nThese files were not expanded in full (size/priority); consider their path semantics:\n${list}`;
+  }
   return zh
-    ? `请为以下代码变更生成提交信息:\n\n${body}\n\n请直接返回提交信息,不需要额外解释。`
-    : `Generate a commit message for the following changes:\n\n${body}\n\nReturn the commit message directly without any explanation.`;
+    ? `请为以下代码变更生成提交信息:\n\n${body}${others}\n\n请直接返回提交信息,不需要额外解释。`
+    : `Generate a commit message for the following changes:\n\n${body}${others}\n\nReturn the commit message directly without any explanation.`;
+}
+
+/**
+ * 构造「点名深挖文件」提示:只给轻量清单,让模型决定看哪些全文 diff。
+ */
+export function buildSelectFilesPrompt(
+  changes: GitChange[],
+  language: CommitLanguage,
+  budgetChars: number,
+  maxFocusFiles: number = DIFF_LIMITS.MAX_FOCUS_FILES,
+): ChatMessage[] {
+  const zh = language !== 'en-US';
+  const manifest = formatChangeManifest(changes, language);
+  const system = zh
+    ? [
+        '你是 Git 变更分诊助手。',
+        '根据文件清单(无全文 diff)决定哪些文件值得展开细读,以便生成准确的提交信息。',
+        '不要写 commit message,不要解释。',
+        '不要使用 <think> 标签。',
+        '只输出一段 JSON,格式严格为: {"focus":["路径1","路径2"]}',
+        '规则:',
+        '- 优先业务源码,其次测试/配置;锁文件、构建产物、二进制通常不要放入 focus',
+        `- focus 最多 ${maxFocusFiles} 个`,
+        `- focus 文件的「约 N 字符」合计尽量不超过 ${budgetChars}`,
+        '- 路径必须来自清单,不要编造',
+      ].join('\n')
+    : [
+        'You are a git change triage assistant.',
+        'From a file manifest (no full diffs), choose which files deserve a full diff read to write an accurate commit message.',
+        'Do NOT write a commit message. Do NOT explain.',
+        'Do NOT use <think> tags.',
+        'Output ONLY JSON of the form: {"focus":["path1","path2"]}',
+        'Rules:',
+        '- Prefer business source, then tests/config; usually skip lockfiles, build artifacts, binaries',
+        `- At most ${maxFocusFiles} paths in focus`,
+        `- Combined "~N chars" of focus files should stay under ${budgetChars} when possible`,
+        '- Paths must come from the manifest; do not invent paths',
+      ].join('\n');
+
+  const user = zh
+    ? `变更清单如下。请选出需要展开全文的文件:\n\n${manifest}\n\n只返回 JSON。`
+    : `File manifest below. Pick files to expand in full:\n\n${manifest}\n\nReturn JSON only.`;
+
+  return [
+    { role: 'system', content: system },
+    { role: 'user', content: user },
+  ];
+}
+
+function getSummarizeSystemPrompt(language: CommitLanguage): string {
+  if (language === 'en-US') {
+    return [
+      'You are a code change analyst.',
+      'Summarize the provided git diffs into structured bullet points.',
+      'Do NOT write a git commit message.',
+      'Do NOT use <think> tags or show a reasoning process.',
+      'Output only:',
+      '1) One-line theme',
+      '2) Bullet list of what changed and why (each line starts with "- ")',
+      '3) Optional scope/module candidates (comma-separated)',
+      'Write in English.',
+    ].join('\n');
+  }
+  return [
+    '你是代码变更分析助手。',
+    '请将提供的 git diff 总结为结构化要点。',
+    '不要写 git 提交信息。',
+    '不要使用 <think> 标签或展示思考过程。',
+    '只输出：',
+    '1) 一句话主题',
+    '2) 变更要点列表（每行以「- 」开头，说明做了什么以及为何）',
+    '3) 可选的 scope/模块候选（逗号分隔）',
+    '使用简体中文。',
+  ].join('\n');
+}
+
+/**
+ * 构造「批摘要」提示:只产出结构化要点,不写 commit message。
+ */
+export function buildSummarizePrompt(
+  changes: GitChange[],
+  language: CommitLanguage,
+  batchIndex: number,
+  batchCount: number,
+  contextSize?: number,
+): ChatMessage[] {
+  const zh = language !== 'en-US';
+  const maxChars = contextSize !== undefined
+    ? maxDiffCharsFromContext(contextSize)
+    : DIFF_LIMITS.MAX_TOTAL_CHARS;
+  const body = formatChangesBody(changes, language, maxChars);
+  const user = zh
+    ? `这是第 ${batchIndex}/${batchCount} 批代码变更,请总结要点(不要写提交信息):\n\n${body}`
+    : `This is batch ${batchIndex}/${batchCount} of code changes. Summarize the key points (do NOT write a commit message):\n\n${body}`;
+  return [
+    { role: 'system', content: getSummarizeSystemPrompt(language) },
+    { role: 'user', content: user },
+  ];
+}
+
+/**
+ * 构造「合并摘要 → 最终提交信息」提示。
+ * customSystemPrompt 非空时覆盖内置 Conventional Commits system 提示词。
+ */
+export function buildMergePrompt(
+  summaries: string[],
+  language: CommitLanguage,
+  customSystemPrompt?: string | null,
+  omittedPaths?: string[],
+): ChatMessage[] {
+  const zh = language !== 'en-US';
+  const blocks = summaries
+    .map((s, i) => (zh ? `【批次 ${i + 1} 摘要】\n${s}` : `[Batch ${i + 1} summary]\n${s}`))
+    .join('\n\n');
+
+  let omittedSection = '';
+  if (omittedPaths && omittedPaths.length > 0) {
+    const list = omittedPaths.map((p) => `- ${p}`).join('\n');
+    omittedSection = zh
+      ? `\n\n以下文件因体积过大未纳入详细摘要,生成时请一并考虑其路径语义:\n${list}`
+      : `\n\nThe following files were omitted from detailed summaries due to size; consider their path semantics:\n${list}`;
+  }
+
+  const user = zh
+    ? `以下是多批代码变更的摘要。请综合它们,生成一条符合约定式提交的完整提交信息。\n\n${blocks}${omittedSection}\n\n请直接返回提交信息,不需要额外解释。`
+    : `Below are summaries of multiple batches of code changes. Synthesize them into one Conventional Commits message.\n\n${blocks}${omittedSection}\n\nReturn the commit message directly without any explanation.`;
+
+  return [
+    { role: 'system', content: resolveSystemPrompt(language, customSystemPrompt) },
+    { role: 'user', content: user },
+  ];
 }
 
 /**
  * 构造生成提交信息的 system + user 消息。
  * customSystemPrompt 非空时覆盖对应语言的内置 system 提示词;user 消息(含 diff)始终由系统组装。
  * contextSize(tokens) 用于估算可送入的 diff 字符预算。
+ * otherPaths: 未展开全文的路径,仅作语义参考。
  */
 export function buildPrompt(
   changes: GitChange[],
   language: CommitLanguage,
   customSystemPrompt?: string | null,
   contextSize?: number,
+  otherPaths?: string[],
 ): ChatMessage[] {
   const maxChars = contextSize !== undefined
     ? maxDiffCharsFromContext(contextSize)
     : DIFF_LIMITS.MAX_TOTAL_CHARS;
   return [
     { role: 'system', content: resolveSystemPrompt(language, customSystemPrompt) },
-    { role: 'user', content: buildUserPrompt(changes, language, maxChars) },
+    { role: 'user', content: buildUserPrompt(changes, language, maxChars, otherPaths) },
   ];
 }
 

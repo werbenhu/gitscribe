@@ -13,7 +13,8 @@
   - OpenAI Chat Completions（`/chat/completions`）— 兼容 DeepSeek、Kimi、智谱 GLM、通义等
   - OpenAI Responses（`/responses`）
   - Anthropic Messages（`/v1/messages`）— 含 Anthropic 兼容网关
-- **按模型配置上下文**：每个模型独立设置上下文大小（默认 1M tokens），在添加模型时填写
+- **按模型配置上下文**：每个模型独立设置上下文大小（默认 128k tokens），在添加模型时填写；请按真实窗口填写，偏大会触发 API 超限
+- **大变更智能分诊**：暂存 diff 超出模型预算时，先让模型根据轻量清单（路径 / 增删行 / 体积）点名重点文件并展开 diff；若仍超预算再分批摘要并合并；其余文件仅保留路径语义
 - **生成设置**：切换提交信息语言（中文 / 英文），自定义 System Prompt，支持一键恢复默认
 - **更合理的默认提示**：变更少时正文简短；变更多时用总述 + Markdown 条目列表（`- 条目`）
 - **测试连接**：保存前验证 Base URL / API Key / 格式 / 模型
@@ -23,13 +24,15 @@
 
 1. 命令面板（`Ctrl+Shift+P`）→ **Git Scribe: 配置模型供应商**
 2. 添加供应商（名称、Base URL、API Key、API 格式）
-3. 添加模型，并为每个模型填写上下文大小（默认 1M tokens），然后保存
+3. 添加模型，并为每个模型填写上下文大小（默认 128k tokens；请与模型真实窗口一致），然后保存
 4. 在侧边栏底部下拉框选择当前供应商 / 模型
 5. 在 Git 仓库中完成修改（可选先 `git add`）
 6. 点击 SCM 标题栏生成按钮，或快捷键 `Ctrl+Alt+G` / 命令 **Git Scribe: 生成提交信息**
 7. 检查 SCM 输入框中的提交信息后自行提交
 
 若暂存区为空，会自动暂存工作区全部改动，再生成提交信息。
+
+若暂存 diff 过大无法一次送入模型，进度可能依次显示 `正在选择重点文件…`、分批分析（如 `正在分析变更 (2/5)…`），再进入汇总步骤后填入最终提交信息。
 
 ### 配置入口
 
@@ -76,7 +79,7 @@ npx vsce package --no-dependencies
 通过 **Extensions: Install from VSIX...** 安装，或：
 
 ```bash
-code --install-extension git-commit-scribe-1.0.2.vsix
+code --install-extension git-commit-scribe-1.0.3.vsix
 ```
 
 ## 技术说明

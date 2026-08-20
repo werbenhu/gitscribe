@@ -286,7 +286,7 @@ export function getSettingsHtml(nonce: string): string {
           <input type="text" id="modelContextInput" inputmode="numeric" placeholder="上下文 tokens">
           <button class="secondary" id="addModelBtn">＋ 添加模型</button>
         </div>
-        <div id="modelAddHint">每个模型单独设置上下文大小，默认 1M tokens。添加后需点「保存修改」。</div>
+        <div id="modelAddHint">每个模型单独设置上下文大小，默认 128k tokens（请按真实窗口填写，偏大会触发超限）。添加后需点「保存修改」。</div>
       </div>
 
       <div class="btn-row">

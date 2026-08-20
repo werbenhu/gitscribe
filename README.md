@@ -13,7 +13,8 @@ A VS Code extension that generates Git commit messages with configurable multi-p
   - OpenAI Chat Completions (`/chat/completions`) — DeepSeek, Kimi, Zhipu GLM, Tongyi, and most OpenAI-compatible APIs
   - OpenAI Responses (`/responses`)
   - Anthropic Messages (`/v1/messages`) — including Anthropic-compatible gateways
-- **Per-model context size**: each model has its own context window (default 1M tokens), set when adding the model
+- **Per-model context size**: each model has its own context window (default 128k tokens), set when adding the model — use the real window size to avoid API context errors
+- **Large-change triage**: when the staged diff exceeds the model budget, Git Scribe first asks the model which files matter (from a lightweight path/+/-/size manifest), digs into those diffs, and only then batches/summarizes if still too large — other files keep path-only context
 - **Generation settings**: choose commit language (Chinese / English) and customize the System Prompt, with one-click restore to defaults
 - **Smarter default prompt**: small changes stay short; larger changes use a short summary plus Markdown bullet list (`- item`)
 - **Connection test**: verify Base URL / API Key / format / model before saving
@@ -23,13 +24,15 @@ A VS Code extension that generates Git commit messages with configurable multi-p
 
 1. Command Palette (`Ctrl+Shift+P`) → **Git Scribe: 配置模型供应商**
 2. Add a provider (name, Base URL, API Key, API format)
-3. Add models with optional per-model context size (default 1M tokens), then save
+3. Add models with optional per-model context size (default 128k tokens; match your model’s real window), then save
 4. Select the active provider/model from the sidebar bottom dropdowns
 5. In a Git repository, make your changes (optional: `git add` first)
 6. Click the generate button on the SCM title bar, or press `Ctrl+Alt+G` / run **Git Scribe: 生成提交信息**
 7. Review the message in the SCM input box, then commit
 
 If nothing is staged, Git Scribe stages all working-tree changes automatically, then generates the message.
+
+If the staged diff is too large for a single request, progress may show `Choosing important files…`, then optional batch analysis (`Analyzing changes (2/5)…`), then a merge step before the final message is filled in.
 
 ### Settings entry points
 
@@ -76,7 +79,7 @@ npx vsce package --no-dependencies
 Install with **Extensions: Install from VSIX...**, or:
 
 ```bash
-code --install-extension git-commit-scribe-1.0.2.vsix
+code --install-extension git-commit-scribe-1.0.3.vsix
 ```
 
 ## Technical notes

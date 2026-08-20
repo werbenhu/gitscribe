@@ -9,7 +9,7 @@ export type ApiFormat = 'openai-chat' | 'openai-responses' | 'anthropic';
 export interface ModelConfig {
   /** 模型 id,如 deepseek-v4-flash */
   id: string;
-  /** 该模型上下文大小(tokens),默认 1M */
+  /** 该模型上下文大小(tokens),默认 128k */
   contextSize: number;
 }
 

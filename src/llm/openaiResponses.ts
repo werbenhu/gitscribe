@@ -1,4 +1,4 @@
-import { API_CONSTANTS } from '../constants';
+import { API_CONSTANTS, isDeepSeekModel } from '../constants';
 import { buildUrl, LLMError, postJson } from './http';
 import type { ChatMessage } from './prompt';
 
@@ -31,16 +31,21 @@ export async function callOpenAIResponses(
     .map((m) => m.content)
     .join('\n\n');
 
+  const body: Record<string, unknown> = {
+    model,
+    instructions: system,
+    input: user,
+    max_output_tokens: API_CONSTANTS.MAX_TOKENS,
+    temperature: API_CONSTANTS.TEMPERATURE,
+  };
+  if (isDeepSeekModel(model)) {
+    body.reasoning = { effort: 'none' };
+  }
+
   const data = await postJson<ResponsesAPIOutput>(
     url,
     { Authorization: `Bearer ${apiKey}` },
-    {
-      model,
-      instructions: system,
-      input: user,
-      max_output_tokens: API_CONSTANTS.MAX_TOKENS,
-      temperature: API_CONSTANTS.TEMPERATURE,
-    },
+    body,
   );
 
   if (data.output_text) {

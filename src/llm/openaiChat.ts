@@ -1,4 +1,4 @@
-import { API_CONSTANTS } from '../constants';
+import { API_CONSTANTS, isDeepSeekModel } from '../constants';
 import { buildUrl, LLMError, postJson } from './http';
 import type { ChatMessage } from './prompt';
 
@@ -27,16 +27,22 @@ export async function callOpenAIChat(
     ? baseUrl.replace(/\/+$/, '')
     : buildUrl(baseUrl, '/chat/completions');
 
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    max_tokens: API_CONSTANTS.MAX_TOKENS,
+    temperature: API_CONSTANTS.TEMPERATURE,
+    stream: false,
+  };
+  // DeepSeek Chat 默认开 thinking;提交信息场景关闭,避免额度耗在推理上
+  if (isDeepSeekModel(model)) {
+    body.thinking = { type: 'disabled' };
+  }
+
   const data = await postJson<ChatCompletionResponse>(
     url,
     { Authorization: `Bearer ${apiKey}` },
-    {
-      model,
-      messages,
-      max_tokens: API_CONSTANTS.MAX_TOKENS,
-      temperature: API_CONSTANTS.TEMPERATURE,
-      stream: false,
-    },
+    body,
   );
 
   const content = extractChatContent(data.choices?.[0]?.message?.content);
