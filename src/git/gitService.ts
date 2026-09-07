@@ -38,10 +38,10 @@ export class GitService {
     return Boolean(this.getRepository());
   }
 
-  /** 是否存在暂存的变更 */
-  async hasStagedChanges(): Promise<boolean> {
-    const changes = await this.getStagedChanges();
-    return changes.length > 0;
+  /** 是否存在暂存的变更(仅读状态,不取 diff) */
+  hasStagedChanges(): boolean {
+    const repository = this.getRepository();
+    return Boolean(repository && repository.state.indexChanges.length > 0);
   }
 
   /**
@@ -88,19 +88,20 @@ export class GitService {
       items = repository.state.indexChanges;
     }
 
-    const changes: GitChange[] = [];
-    for (const item of items) {
-      // Windows 上 uri.path 形如 /e:/foo,git API 认的是 fsPath 或相对仓库根路径
-      const displayPath = this.toRepoRelativePath(repository, item.uri.fsPath);
-      const diff = await this.getFileDiff(
-        repository,
-        item.uri.fsPath,
-        displayPath,
-        item.status,
-      );
-      changes.push({ path: displayPath, status: item.status, diff });
-    }
-    return changes;
+    // 逐文件 diff 并发获取,保持原顺序
+    return Promise.all(
+      items.map(async (item) => {
+        // Windows 上 uri.path 形如 /e:/foo,git API 认的是 fsPath 或相对仓库根路径
+        const displayPath = this.toRepoRelativePath(repository, item.uri.fsPath);
+        const diff = await this.getFileDiff(
+          repository,
+          item.uri.fsPath,
+          displayPath,
+          item.status,
+        );
+        return { path: displayPath, status: item.status, diff };
+      }),
+    );
   }
 
   /** 仓库相对路径(正斜杠),便于提示词阅读;失败则回退 fsPath */

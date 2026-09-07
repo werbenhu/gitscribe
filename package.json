@@ -2,7 +2,7 @@
   "name": "git-commit-scribe",
   "displayName": "Git Scribe",
   "description": "AI-powered Git commit message generator",
-  "version": "1.0.5",
+  "version": "1.0.7",
   "publisher": "werbenhu",
   "license": "MIT",
   "icon": "resources/icon.png",

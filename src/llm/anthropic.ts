@@ -1,5 +1,5 @@
 import { API_CONSTANTS, isDeepSeekModel } from '../constants';
-import { LLMError, postJson } from './http';
+import { LLMError, postJson, postJsonStream, type TokenSink } from './http';
 import type { ChatMessage } from './prompt';
 
 interface AnthropicContentPart {
@@ -15,17 +15,25 @@ interface AnthropicMessagesResponse {
   error?: { message?: string; type?: string };
 }
 
+interface AnthropicStreamEvent {
+  type?: string;
+  delta?: { type?: string; text?: string };
+  error?: { message?: string };
+}
+
 /**
  * Anthropic Messages 格式:
  * POST {baseUrl}/v1/messages(baseUrl 已以 /v1 结尾时补 /messages)
  *
  * 兼容 DeepSeek 等网关:可能返回 thinking 块 + text 块;思考模型易把 max_tokens 耗尽。
+ * 传入 onToken 时启用 SSE 流式输出。
  */
 export async function callAnthropic(
   baseUrl: string,
   apiKey: string,
   model: string,
   messages: ChatMessage[],
+  onToken?: TokenSink,
 ): Promise<string> {
   const base = baseUrl.replace(/\/+$/, '');
   const url = base.endsWith('/v1') ? `${base}/messages` : `${base}/v1/messages`;
@@ -42,26 +50,69 @@ export async function callAnthropic(
     temperature: API_CONSTANTS.TEMPERATURE,
     system,
     messages: chatMessages,
+    stream: Boolean(onToken),
   };
   if (isDeepSeekModel(model)) {
-    // DeepSeek Anthropic 文档: reasoning.effort=none 关闭 thinking
+    // DeepSeek 默认开 thinking(effort=high),提交场景关闭;
+    // 双写两种风格参数,兼容只认其中一种的网关
     body.reasoning = { effort: 'none' };
+    body.thinking = { type: 'disabled' };
   }
 
-  const data = await postJson<AnthropicMessagesResponse>(
-    url,
-    {
-      'x-api-key': apiKey,
-      'anthropic-version': API_CONSTANTS.ANTHROPIC_VERSION,
-      // 部分兼容网关同时认 Bearer
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body,
-  );
+  const headers = {
+    'x-api-key': apiKey,
+    'anthropic-version': API_CONSTANTS.ANTHROPIC_VERSION,
+    // 部分兼容网关同时认 Bearer
+    Authorization: `Bearer ${apiKey}`,
+  };
+
+  if (onToken) {
+    return streamMessages(url, headers, body, model, onToken);
+  }
+
+  const data = await postJson<AnthropicMessagesResponse>(url, headers, body);
 
   const text = extractAnthropicText(data);
   if (!text) {
     throw new LLMError(describeEmptyAnthropic(data, model));
+  }
+  return text;
+}
+
+async function streamMessages(
+  url: string,
+  headers: Record<string, string>,
+  body: unknown,
+  model: string,
+  onToken: TokenSink,
+): Promise<string> {
+  let content = '';
+  let sawThinking = false;
+
+  await postJsonStream(url, headers, body, (data) => {
+    const event = JSON.parse(data) as AnthropicStreamEvent;
+    if (event.type === 'content_block_delta') {
+      if (event.delta?.type === 'text_delta' && event.delta.text) {
+        content += event.delta.text;
+        onToken(event.delta.text);
+      } else if (event.delta?.type === 'thinking_delta') {
+        sawThinking = true;
+      }
+      return;
+    }
+    if (event.type === 'error') {
+      throw new LLMError(`流式生成失败: ${event.error?.message ?? '未知错误'}`);
+    }
+  });
+
+  const text = content.trim();
+  if (!text) {
+    throw new LLMError(
+      sawThinking
+        ? `模型只返回了思考内容、没有提交信息正文(模型: ${model})。` +
+          '请改用非推理模型,或确认该模型在 Anthropic 兼容接口下会输出 text 块。'
+        : `模型返回为空,请检查模型名称与 API 格式是否正确(模型: ${model})`,
+    );
   }
   return text;
 }

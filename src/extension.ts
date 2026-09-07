@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { generateId, ProviderStore } from './config/providerStore';
 import { GitService } from './git/gitService';
 import { generateCommitMessage } from './llm/client';
+import { sanitizeStreamingMessage } from './llm/prompt';
 import { SessionLogBuilder } from './llm/sessionLog';
 import { SettingsPanel } from './webview/settingsPanel';
 
@@ -59,27 +60,33 @@ async function generateCommand(): Promise<void> {
       try {
         progress.report({ message: '正在准备变更…' });
 
-        // 3. 获取暂存区变更;为空则先暂存工作区全部改动
-        let changes = await gitService.getStagedChanges();
-        if (changes.length === 0) {
+        // 3. 无暂存变更时先暂存工作区全部改动(仅读状态,不重复取 diff)
+        if (!gitService.hasStagedChanges()) {
           const stagedCount = await gitService.stageAllChanges();
           if (stagedCount === 0) {
             vscode.window.showWarningMessage('Git Scribe: 没有可提交的变更。');
             return;
           }
-          changes = await gitService.getStagedChanges();
-          if (changes.length === 0) {
-            vscode.window.showWarningMessage('Git Scribe: 暂存后仍无变更,请检查 Git 状态。');
-            return;
-          }
         }
 
-        // 4. 调用 LLM 生成(超预算时自动分批摘要再合并)
+        const changes = await gitService.getStagedChanges();
+        if (changes.length === 0) {
+          vscode.window.showWarningMessage('Git Scribe: 未取得变更内容,请检查 Git 状态。');
+          return;
+        }
+
+        // 4. 调用 LLM 生成(超预算时自动分批摘要再合并);
+        //    最终生成阶段流式输出,增量写入 SCM 输入框
+        let streamed = '';
         const message = await generateCommitMessage(
           changes,
           config,
           (phase) => {
             progress.report({ message: phase });
+          },
+          (token) => {
+            streamed += token;
+            gitService.setCommitMessage(sanitizeStreamingMessage(streamed));
           },
           session,
         );

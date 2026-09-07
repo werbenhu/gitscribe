@@ -387,6 +387,16 @@ export function buildPrompt(
 }
 
 /**
+ * 流式输出期间的轻量清洗:剥掉未闭合的 <think> 块与前导代码围栏,
+ * 让增量文本可直接展示。最终结果仍以 sanitizeCommitMessage 为准。
+ */
+export function sanitizeStreamingMessage(raw: string): string {
+  let text = raw.replace(/<think>[\s\S]*?(<\/think>|$)/gi, '');
+  text = text.replace(/^\s*```[\w-]*\s*\n?/, '');
+  return text.trimStart();
+}
+
+/**
  * 清洗模型输出:去 <think> 块、代码围栏、首尾引号,
  * 并尽量剥掉模型在提交信息前加的解释性前言。
  */

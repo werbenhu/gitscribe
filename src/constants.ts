@@ -42,6 +42,8 @@ export const API_CONSTANTS = {
   MAX_TOKENS: 8_192,
   /** 采样温度 */
   TEMPERATURE: 0.7,
+  /** 分批摘要时的最大并发请求数 */
+  SUMMARY_CONCURRENCY: 4,
 } as const;
 
 /** 是否为 DeepSeek 系模型(默认开 thinking,易把输出额度耗尽) */
@@ -73,6 +75,11 @@ export const CONTEXT_DEFAULTS = {
   SAFETY_RATIO: 0.7,
   /** 无论上下文多大都至少保留的 diff 字符预算 */
   MIN_DIFF_CHARS: 4_000,
+  /**
+   * 单次生成的 diff 字符预算上限。
+   * 预算越大 prompt 越长、首 token 越慢;超出后走分批摘要流水线。
+   */
+  MAX_DIFF_BUDGET_CHARS: 120_000,
 } as const;
 
 /** diff 处理限制(单文件硬上限;总预算由 contextSize 动态计算) */
@@ -101,14 +108,17 @@ export const DIFF_LIMITS = {
 
 /**
  * 根据模型上下文(tokens)估算可用于 diff 的最大字符数。
- * 公式: max(MIN_DIFF_CHARS, (contextSize - RESERVED) * SAFETY_RATIO * CHARS_PER_TOKEN)
+ * 公式: min(MAX_DIFF_BUDGET_CHARS, max(MIN_DIFF_CHARS, (contextSize - RESERVED) * SAFETY_RATIO * CHARS_PER_TOKEN))
  */
 export function maxDiffCharsFromContext(contextSize: number): number {
   const size = Number.isFinite(contextSize) ? contextSize : CONTEXT_DEFAULTS.CONTEXT_SIZE;
   const usableTokens = Math.max(0, size - CONTEXT_DEFAULTS.RESERVED_TOKENS);
   const safeTokens = usableTokens * CONTEXT_DEFAULTS.SAFETY_RATIO;
   const chars = Math.floor(safeTokens * CONTEXT_DEFAULTS.CHARS_PER_TOKEN);
-  return Math.max(CONTEXT_DEFAULTS.MIN_DIFF_CHARS, chars);
+  return Math.min(
+    CONTEXT_DEFAULTS.MAX_DIFF_BUDGET_CHARS,
+    Math.max(CONTEXT_DEFAULTS.MIN_DIFF_CHARS, chars),
+  );
 }
 
 /** 规范化用户输入的上下文大小 */
